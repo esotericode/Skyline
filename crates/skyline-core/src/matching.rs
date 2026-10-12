@@ -39,8 +39,39 @@ impl CatalogIndex {
         }
     }
 
-    pub fn accepts_loose_file(&self, path: &Path) -> bool {
-        self.loose_files.accepts(path)
+    pub fn accepts_loose_file(&self, path: &Path, size: u64) -> bool {
+        self.loose_files.accepts(path, size)
+    }
+
+    /// Whole-file evidence first, so catalogs that list headered files still match as
+    /// before. Only when the whole file has no candidate is the header-free content
+    /// compared, and the explanation then says which bytes were compared.
+    pub fn identify_file(
+        &self,
+        size: u64,
+        digests: &Digests,
+        header: Option<&HeaderEvidence>,
+    ) -> MatchResult {
+        let mut whole = self.identify(size, digests);
+        let Some(header) = header else {
+            return whole;
+        };
+        if !whole.candidates.is_empty() {
+            return whole;
+        }
+        let mut content = self.identify(header.size, &header.digests);
+        if !content.candidates.is_empty() {
+            content.explanation = format!(
+                "Compared without the {} ({} bytes); the file on disk is unchanged. {}",
+                header.format, header.header_bytes, content.explanation
+            );
+            return content;
+        }
+        whole.explanation = format!(
+            "{} Also compared without the {} ({} bytes); no catalog entry matched either way.",
+            whole.explanation, header.format, header.header_bytes
+        );
+        whole
     }
 
     pub fn identify(&self, size: u64, digests: &Digests) -> MatchResult {

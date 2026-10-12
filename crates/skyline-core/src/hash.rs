@@ -1,4 +1,7 @@
-use crate::model::Digests;
+use crate::{
+    formats::{HeaderRule, MAX_HEADER_BYTES, detect_header},
+    model::{Digests, HeaderEvidence},
+};
 use anyhow::{Context, Result, bail};
 use md5::Md5;
 use sha1::Sha1;
@@ -31,17 +34,91 @@ impl Cancellation {
     }
 }
 
+struct Hashers {
+    crc: crc32fast::Hasher,
+    md5: Md5,
+    sha1: Sha1,
+    sha256: Sha256,
+}
+
+impl Hashers {
+    fn new() -> Self {
+        Self {
+            crc: crc32fast::Hasher::new(),
+            md5: Md5::new(),
+            sha1: Sha1::new(),
+            sha256: Sha256::new(),
+        }
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        self.crc.update(bytes);
+        self.md5.update(bytes);
+        self.sha1.update(bytes);
+        self.sha256.update(bytes);
+    }
+
+    fn finish(self) -> Digests {
+        Digests {
+            crc32: Some(format!("{:08x}", self.crc.finalize())),
+            md5: Some(format!("{:x}", self.md5.finalize())),
+            sha1: Some(format!("{:x}", self.sha1.finalize())),
+            sha256: Some(format!("{:x}", self.sha256.finalize())),
+        }
+    }
+}
+
 pub fn hash_stream(
+    reader: impl Read,
+    cancel: &Cancellation,
+    progress: impl FnMut(u64),
+) -> Result<(u64, Digests)> {
+    let hashed = hash_stream_with_header(reader, cancel, progress, |_| None)?;
+    Ok((hashed.size, hashed.digests))
+}
+
+/// Whole-file digests, plus digests of the bytes after a recognized header.
+pub struct Hashed {
+    pub size: u64,
+    pub digests: Digests,
+    pub header: Option<HeaderEvidence>,
+}
+
+/// One pass over the bytes. `header` sees up to the first `MAX_HEADER_BYTES` bytes
+/// and may name a header to exclude from a second, header-free set of digests. The
+/// source is only read; nothing is stripped from the file itself.
+pub fn hash_stream_with_header(
     mut reader: impl Read,
     cancel: &Cancellation,
     mut progress: impl FnMut(u64),
-) -> Result<(u64, Digests)> {
-    let mut crc = crc32fast::Hasher::new();
-    let mut md5 = Md5::new();
-    let mut sha1 = Sha1::new();
-    let mut sha256 = Sha256::new();
+    header: impl FnOnce(&[u8]) -> Option<HeaderRule>,
+) -> Result<Hashed> {
     let mut buffer = [0_u8; 64 * 1024];
-    let mut size = 0;
+    // One byte past the largest header shows whether any content follows it.
+    let prefix = MAX_HEADER_BYTES + 1;
+    let mut filled = 0;
+    while filled < prefix {
+        cancel.check()?;
+        let count = reader
+            .read(&mut buffer[filled..prefix])
+            .context("Reading ROM bytes")?;
+        if count == 0 {
+            break;
+        }
+        filled += count;
+    }
+    // A header must be followed by content; a file that is only a header has none.
+    let rule = header(&buffer[..filled]).filter(|rule| rule.bytes < filled);
+    let mut whole = Hashers::new();
+    let mut content = rule.map(|_| Hashers::new());
+    whole.update(&buffer[..filled]);
+    if let (Some(rule), Some(content)) = (rule, content.as_mut()) {
+        content.update(&buffer[rule.bytes..filled]);
+    }
+    let mut size = filled as u64;
+    if filled > 0 {
+        progress(size);
+    }
     loop {
         cancel.check()?;
         let count = reader.read(&mut buffer).context("Reading ROM bytes")?;
@@ -49,23 +126,25 @@ pub fn hash_stream(
             break;
         }
         let bytes = &buffer[..count];
-        crc.update(bytes);
-        md5.update(bytes);
-        sha1.update(bytes);
-        sha256.update(bytes);
+        whole.update(bytes);
+        if let Some(content) = content.as_mut() {
+            content.update(bytes);
+        }
         size += count as u64;
         progress(size);
     }
     cancel.check()?;
-    Ok((
+    let header = rule.zip(content).map(|(rule, content)| HeaderEvidence {
+        format: rule.format.into(),
+        header_bytes: rule.bytes as u64,
+        size: size - rule.bytes as u64,
+        digests: content.finish(),
+    });
+    Ok(Hashed {
         size,
-        Digests {
-            crc32: Some(format!("{:08x}", crc.finalize())),
-            md5: Some(format!("{:x}", md5.finalize())),
-            sha1: Some(format!("{:x}", sha1.finalize())),
-            sha256: Some(format!("{:x}", sha256.finalize())),
-        },
-    ))
+        digests: whole.finish(),
+        header,
+    })
 }
 
 /// Symlinks, and on Windows also junctions/mount points (name-surrogate reparse points).
@@ -75,11 +154,7 @@ pub fn is_link(metadata: &std::fs::Metadata) -> bool {
     metadata.file_type().is_symlink()
 }
 
-pub fn hash_file(
-    path: &Path,
-    cancel: &Cancellation,
-    progress: impl FnMut(u64),
-) -> Result<(u64, Digests)> {
+pub fn hash_file(path: &Path, cancel: &Cancellation, progress: impl FnMut(u64)) -> Result<Hashed> {
     let before = std::fs::symlink_metadata(path).context("Inspecting source")?;
     if is_link(&before) || !before.is_file() {
         bail!("Only regular files are supported; links/reparse points are skipped");
@@ -104,7 +179,14 @@ pub fn hash_file(
     if is_link(&opened) {
         bail!("Links/reparse points are skipped");
     }
-    let result = hash_stream(&file, cancel, progress)?;
+    let extension = path
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    let result = hash_stream_with_header(&file, cancel, progress, |prefix| {
+        detect_header(prefix, &extension, opened.len())
+    })?;
     let after = file.metadata()?;
     let path_after = std::fs::symlink_metadata(path).context("Rechecking source path")?;
     if is_link(&path_after)
@@ -113,7 +195,7 @@ pub fn hash_file(
     {
         bail!("Source path changed while hashing; rescan when stable");
     }
-    if opened.len() != result.0
+    if opened.len() != result.size
         || opened.len() != after.len()
         || opened.modified()? != after.modified()?
     {

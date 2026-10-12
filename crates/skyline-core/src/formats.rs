@@ -72,8 +72,48 @@ fn unsupported_extension(extension: &str) -> Option<&'static str> {
     }
 }
 
+/// Enough bytes to recognize every header below.
+pub const MAX_HEADER_BYTES: usize = 512;
+
+/// A header that copiers/emulators prepend to cartridge content. Reference catalogs
+/// such as No-Intro list the content without it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeaderRule {
+    pub format: &'static str,
+    pub bytes: usize,
+}
+
+/// Recognizes headers by their signature; the SNES copier header has none, so it is
+/// recognized only for SNES extensions whose size is a 1 KiB multiple plus 512 bytes.
+/// Detection only adds a second, header-free comparison; it never changes the file.
+pub fn detect_header(prefix: &[u8], extension: &str, size: u64) -> Option<HeaderRule> {
+    let rule = |format, bytes| Some(HeaderRule { format, bytes });
+    if prefix.starts_with(b"NES\x1a") {
+        rule("iNES/NES 2.0 header", 16)
+    } else if prefix.get(1..10) == Some(b"ATARI7800") {
+        rule("Atari 7800 A78 header", 128)
+    } else if prefix.starts_with(b"LYNX\0") {
+        rule("Atari Lynx LNX header", 64)
+    } else if matches!(extension, "smc" | "sfc" | "swc" | "fig") && size % 1024 == 512 {
+        rule("SNES copier header", 512)
+    } else {
+        None
+    }
+}
+
+/// Which extensionless files to read. Accepting all of them because one catalog entry
+/// has no extension would also hash every LICENSE, Makefile and .git file in a folder.
+enum Extensionless {
+    Never,
+    /// Only files whose size matches an extensionless catalog entry.
+    Sizes(BTreeSet<u64>),
+    /// An extensionless entry has no size, so size cannot narrow the candidates.
+    Any,
+}
+
 pub(crate) struct LooseFilePolicy {
     extensions: BTreeSet<String>,
+    extensionless: Extensionless,
 }
 
 impl LooseFilePolicy {
@@ -82,22 +122,46 @@ impl LooseFilePolicy {
             .iter()
             .map(|extension| (*extension).to_owned())
             .collect();
+        let mut extensionless = Extensionless::Never;
         for catalog in catalogs {
             for entry in &catalog.entries {
                 let extension = extension(Path::new(&entry.filename));
+                if extension.is_empty() {
+                    extensionless = match (extensionless, entry.size) {
+                        (Extensionless::Any, _) | (_, None) => Extensionless::Any,
+                        (Extensionless::Never, Some(size)) => {
+                            Extensionless::Sizes(BTreeSet::from([size]))
+                        }
+                        (Extensionless::Sizes(mut sizes), Some(size)) => {
+                            sizes.insert(size);
+                            Extensionless::Sizes(sizes)
+                        }
+                    };
+                    continue;
+                }
                 if unsupported_extension(&extension).is_none()
                     && !extensions.contains(extension.as_ref())
                 {
-                    // Unusual and extensionless filenames are valid DAT evidence.
+                    // Unusual extensions declared by a DAT are valid evidence.
                     extensions.insert(extension.into_owned());
                 }
             }
         }
-        Self { extensions }
+        Self {
+            extensions,
+            extensionless,
+        }
     }
 
-    pub(crate) fn accepts(&self, path: &Path) -> bool {
+    pub(crate) fn accepts(&self, path: &Path, size: u64) -> bool {
         let extension = extension(path);
+        if extension.is_empty() {
+            return match &self.extensionless {
+                Extensionless::Never => false,
+                Extensionless::Sizes(sizes) => sizes.contains(&size),
+                Extensionless::Any => true,
+            };
+        }
         unsupported_extension(&extension).is_none() && self.extensions.contains(extension.as_ref())
     }
 }

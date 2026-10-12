@@ -65,6 +65,7 @@ fn main() -> anyhow::Result<()> {
                     path: format!("synthetic/Fixture {id:06}.gb").into(),
                     size: Some(3),
                     digests: Some(digests),
+                    header: None,
                     result,
                 }
             })

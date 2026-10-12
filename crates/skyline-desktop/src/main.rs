@@ -12,7 +12,7 @@ use skyline_core::{
     matching::CatalogIndex,
     model::{Catalog, FileRecord, Verification},
     scan::{ScanOptions, ScanProgress, scan_folder},
-    settings::{AppSettings, CatalogChoice},
+    settings::{AppSettings, CatalogChoice, SETTINGS_REVISION},
     store::Store,
     view::{Sort, display_path, format_size, format_utc, query_rows_in_system},
 };
@@ -392,6 +392,7 @@ impl Skyline {
 
     fn current_settings(&self) -> AppSettings {
         AppSettings {
+            revision: SETTINGS_REVISION,
             dat_path: self.dat_path.clone(),
             root_path: self.root_path.clone(),
             exclusions: self.exclusions.clone(),
@@ -657,6 +658,22 @@ impl Skyline {
                                 "Identical content in {} scanned paths",
                                 self.duplicates[hash]
                             ));
+                        }
+                    }
+                    if let Some(header) = &record.header {
+                        ui.separator();
+                        ui.strong("Content without header");
+                        ui.label(format!(
+                            "{} detected ({} bytes). Compared {} after it; the file is unchanged.",
+                            header.format,
+                            header.header_bytes,
+                            format_size(header.size)
+                        ));
+                        for (algorithm, digest) in header.digests.values() {
+                            if let Some(digest) = digest {
+                                ui.label(algorithm);
+                                ui.monospace(digest);
+                            }
                         }
                     }
                     for (heading, candidates) in [

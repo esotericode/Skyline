@@ -372,6 +372,7 @@ fn database_roundtrip_retains_immutable_snapshot_and_completed_collection() {
         path: PathBuf::from("synthetic.gb"),
         size: Some(3),
         digests: Some(hashes()),
+        header: None,
         result: identify("crc=\"352441c2\""),
     };
     store.save_completed_scan(&[record]).unwrap();
@@ -442,6 +443,7 @@ fn view_search_filter_and_sort_use_original_and_reference_names() {
         path: path.into(),
         size: Some(size),
         digests: Some(hashes()),
+        header: None,
         result,
     };
     let rows = vec![
@@ -545,6 +547,7 @@ fn view_sorts_names_case_insensitively_and_status_by_strength() {
         path: path.into(),
         size: Some(3),
         digests: Some(hashes()),
+        header: None,
         result,
     };
     let unknown = || CatalogIndex::new(vec![]).identify(3, &hashes());

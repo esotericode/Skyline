@@ -236,12 +236,14 @@ fn system_search_and_filter_preserve_cross_system_ambiguity_and_unknown_rows() {
             path: "shared.rom".into(),
             size: Some(6),
             digests: Some(digests(b"shared")),
+            header: None,
             result: ambiguous,
         },
         FileRecord {
             path: "unknown.rom".into(),
             size: Some(7),
             digests: Some(digests(b"unknown")),
+            header: None,
             result: index.identify(7, &digests(b"unknown")),
         },
     ];
@@ -350,4 +352,119 @@ fn automatic_system_catalog_snapshot_keeps_provenance_on_reopen() {
             .unwrap(),
         imported.snapshot
     );
+}
+
+fn headered_scan(file: &str, header: &[u8], content: &[u8], entry: &str) -> FileRecord {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join(file);
+    let bytes = [header, content].concat();
+    std::fs::write(&path, &bytes).unwrap();
+    let mut records = scan(
+        directory.path(),
+        vec![catalog("Headerless", entry, content)],
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        bytes,
+        "source must be unchanged"
+    );
+    records.remove(0)
+}
+
+#[test]
+fn recognized_headers_are_excluded_for_comparison_only() {
+    let content: Vec<u8> = (0..40_960_u32).map(|i| (i * 7) as u8).collect();
+    let ines = [b"NES\x1a\x02\x01".as_slice(), &[0; 10]].concat();
+    let record = headered_scan("Game.nes", &ines, &content, "Game.nes");
+    assert_eq!(record.result.status, Verification::Exact);
+    assert!(record.result.explanation.contains("iNES"));
+    let header = record.header.unwrap();
+    assert_eq!((header.header_bytes, header.size), (16, 40_960));
+    assert_eq!(record.size, Some(40_976), "whole-file evidence is kept");
+
+    let mut a78 = vec![0_u8; 128];
+    a78[1..10].copy_from_slice(b"ATARI7800");
+    assert_eq!(
+        headered_scan("Game.a78", &a78, &content, "Game.a78")
+            .result
+            .status,
+        Verification::Exact
+    );
+    let mut lynx = vec![0_u8; 64];
+    lynx[..5].copy_from_slice(b"LYNX\0");
+    assert_eq!(
+        headered_scan("Game.lnx", &lynx, &content, "Game.lnx")
+            .result
+            .status,
+        Verification::Exact
+    );
+    // SNES copier headers have no signature: only size (1 KiB multiple + 512) marks them.
+    let snes: Vec<u8> = content[..32_768].to_vec();
+    assert_eq!(
+        headered_scan("Game.smc", &[0; 512], &snes, "Game.sfc")
+            .result
+            .status,
+        Verification::Exact
+    );
+}
+
+#[test]
+fn whole_file_match_wins_and_unmatched_headers_explain_both_comparisons() {
+    let content = vec![9_u8; 8192];
+    let ines = [b"NES\x1a".as_slice(), &[0; 12]].concat();
+    let whole = [ines.as_slice(), &content].concat();
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("Game.nes"), &whole).unwrap();
+    // A catalog that lists the headered file still matches the whole file.
+    let records = scan(
+        directory.path(),
+        vec![catalog("Headered", "Game.nes", &whole)],
+    );
+    assert_eq!(records[0].result.status, Verification::Exact);
+    assert!(!records[0].result.explanation.contains("without the"));
+    // No match either way: Unknown, and the explanation says both were tried.
+    let records = scan(directory.path(), vec![catalog("Other", "Other.nes", b"x")]);
+    assert_eq!(records[0].result.status, Verification::Unknown);
+    assert!(
+        records[0]
+            .result
+            .explanation
+            .contains("Also compared without the iNES")
+    );
+    // A file that is only a header has no content to compare.
+    std::fs::write(directory.path().join("Game.nes"), &ines).unwrap();
+    assert!(
+        scan(directory.path(), vec![])
+            .pop()
+            .unwrap()
+            .header
+            .is_none()
+    );
+}
+
+#[test]
+fn extensionless_files_are_read_only_when_their_size_matches_a_catalog_entry() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("Game"), b"bare").unwrap();
+    std::fs::write(directory.path().join("LICENSE"), b"MIT License text").unwrap();
+    std::fs::create_dir(directory.path().join(".git")).unwrap();
+    std::fs::write(directory.path().join(".git/HEAD"), b"ref: main").unwrap();
+    let records = scan(
+        directory.path(),
+        vec![catalog("Custom system", "Canonical", b"bare")],
+    );
+    let read: Vec<_> = records
+        .iter()
+        .filter(|r| r.digests.is_some())
+        .map(|r| r.display_name())
+        .collect();
+    assert_eq!(read, ["Game"]);
+    assert_eq!(
+        records.len(),
+        3,
+        "skipped files stay visible as Unsupported"
+    );
+    // Without any extensionless catalog entry, extensionless files are never read.
+    let records = scan(directory.path(), vec![]);
+    assert!(records.iter().all(|r| r.digests.is_none()));
 }

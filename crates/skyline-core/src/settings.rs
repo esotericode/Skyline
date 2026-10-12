@@ -27,10 +27,16 @@ impl CatalogChoice {
     }
 }
 
+/// Bump when a saved field changes meaning, and migrate it in `AppSettings::migrate`.
+pub const SETTINGS_REVISION: u32 = 1;
+
 /// Local preferences only. They never authorize a scan/import or a source mutation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
+    /// Field-level default: preferences saved before revisions existed read as 0.
+    #[serde(default)]
+    pub revision: u32,
     pub dat_path: String,
     pub root_path: String,
     pub exclusions: String,
@@ -46,6 +52,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            revision: SETTINGS_REVISION,
             dat_path: String::new(),
             root_path: String::new(),
             exclusions: String::new(),
@@ -57,5 +64,18 @@ impl Default for AppSettings {
             sort: Sort::Name,
             descending: false,
         }
+    }
+}
+
+impl AppSettings {
+    /// Revision 0 stored `system` as the required import label, defaulting to
+    /// "Game Boy". It is now an optional override of the DAT header name, so a carried
+    /// over value would silently relabel every later import.
+    pub fn migrate(mut self) -> Self {
+        if self.revision < 1 {
+            self.system.clear();
+        }
+        self.revision = SETTINGS_REVISION;
+        self
     }
 }

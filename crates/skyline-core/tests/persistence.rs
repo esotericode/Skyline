@@ -57,6 +57,7 @@ fn v1_database(path: &Path, imported: &ImportedCatalog) -> FileRecord {
         path: "synthetic.gb".into(),
         size: Some(size),
         digests: Some(digests),
+        header: None,
         result,
     };
     connection
@@ -191,6 +192,7 @@ fn settings_round_trip_and_future_optional_fields_preserve_choices() {
     let path = directory.path().join("settings.sqlite3");
     let mut store = Store::open(&path).unwrap();
     let settings = AppSettings {
+        revision: skyline_core::settings::SETTINGS_REVISION,
         dat_path: "references/synthetic.dat".into(),
         root_path: "roms/試験".into(),
         exclusions: "Backups\nUnsorted".into(),
@@ -218,6 +220,34 @@ fn settings_round_trip_and_future_optional_fields_preserve_choices() {
     assert_eq!(restored.system, "");
     assert_eq!(restored.collection_system, None);
     assert_eq!(restored.sort, Sort::Name);
+}
+
+#[test]
+fn legacy_game_boy_default_does_not_become_an_import_override() {
+    // Saved by the build where `system` was the required label defaulting to Game Boy.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-settings.sqlite3");
+    drop(Store::open(&path).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO settings(id,json) VALUES (1,?1)",
+            [r#"{"dat_path":"gb.dat","root_path":"roms","exclusions":"","system":"Game Boy","preferred_catalog":null,"search":"pokemon","status_filter":null,"sort":"name","descending":false}"#],
+        )
+        .unwrap();
+    drop(connection);
+    let mut store = Store::open(&path).unwrap();
+    let restored = store.settings().unwrap();
+    assert_eq!(restored.system, "");
+    assert_eq!(restored.search, "pokemon");
+    assert_eq!(restored.root_path, "roms");
+    // A deliberate override chosen after the change is kept.
+    let chosen = AppSettings {
+        system: "Game Boy".into(),
+        ..restored
+    };
+    store.save_settings(&chosen).unwrap();
+    assert_eq!(store.settings().unwrap().system, "Game Boy");
 }
 
 #[test]

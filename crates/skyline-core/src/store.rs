@@ -138,9 +138,9 @@ impl Store {
             Some(json) if json.len() > MAX_SETTINGS_BYTES => {
                 bail!("Saved preferences exceed the 1 MiB limit")
             }
-            Some(json) => {
-                serde_json::from_str(&json).context("Saved preferences could not be read")
-            }
+            Some(json) => serde_json::from_str::<AppSettings>(&json)
+                .map(AppSettings::migrate)
+                .context("Saved preferences could not be read"),
             None => Ok(AppSettings::default()),
         }
     }

@@ -36,6 +36,7 @@ fn issue(path: PathBuf, status: Verification, explanation: String) -> FileRecord
         path,
         size: None,
         digests: None,
+        header: None,
         result: MatchResult {
             status,
             candidates: vec![],
@@ -134,7 +135,7 @@ pub fn scan_folder(
             }
             continue;
         }
-        if !metadata.is_file() || !index.accepts_loose_file(&path) {
+        if !metadata.is_file() || !index.accepts_loose_file(&path, metadata.len()) {
             let explanation = if !metadata.is_file() {
                 "Only regular loose files can be hashed."
             } else {
@@ -159,13 +160,15 @@ pub fn scan_folder(
             })
         });
         match hashed {
-            Ok((size, digests)) => {
-                hashed_bytes += size;
-                let result = index.identify(size, &digests);
+            Ok(hashed) => {
+                hashed_bytes += hashed.size;
+                let result =
+                    index.identify_file(hashed.size, &hashed.digests, hashed.header.as_ref());
                 records.push(FileRecord {
                     path,
-                    size: Some(size),
-                    digests: Some(digests),
+                    size: Some(hashed.size),
+                    digests: Some(hashed.digests),
+                    header: hashed.header,
                     result,
                 });
             }

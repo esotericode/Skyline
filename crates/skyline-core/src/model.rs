@@ -105,11 +105,24 @@ pub struct MatchResult {
     pub explanation: String,
 }
 
+/// Digests of the bytes after a recognized copier/emulator header. The file itself
+/// is never changed; this is a second view of the same read.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HeaderEvidence {
+    pub format: String,
+    pub header_bytes: u64,
+    pub size: u64,
+    pub digests: Digests,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileRecord {
     pub path: PathBuf,
     pub size: Option<u64>,
     pub digests: Option<Digests>,
+    /// Absent in records saved before header detection existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<HeaderEvidence>,
     pub result: MatchResult,
 }
 
