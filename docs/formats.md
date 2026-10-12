@@ -112,3 +112,9 @@ Technical references checked 2026-10-12: [NESdev iNES](https://www.nesdev.org/wi
 [No-Intro headered/headerless record](https://datomatic.nointro.org/index.php?n=2957&page=show_record&s=45).
 Search-cached primary-source excerpts were used where direct loads returned 403/timeouts.
 The actual No-Intro export provides header metadata alongside whole-file sizes/hashes.
+
+Folder/header follow-up source [c9ba0ac](https://github.com/esotericode/Skyline/commit/c9ba0ac6ffb12beab635b3c6596697c89abdebae)
+passes [CI 38318851217](https://github.com/esotericode/Skyline/actions/runs/38318851217):
+66 Linux / 64 Windows tests, formatting, lint, optimized builds and version checks.
+All 250 actual Fresh1G1R No-Intro catalogs plus the supplied variants were checked
+locally; details and precise adapter boundaries are in [catalog folders](catalog-folders.md).

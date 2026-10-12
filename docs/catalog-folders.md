@@ -100,3 +100,11 @@ Windows folder keys resolve existing parent aliases and normalize canonical verb
 prefixes (including UNC), preserving offline-cache lookup. The UI saves normalized source paths after intake while keeping
 any newer path edit. Non-UTF-8 child filenames become bounded display diagnostics;
 they cannot turn a skipped file into a report-serialization failure.
+
+Final source: [c9ba0ac](https://github.com/esotericode/Skyline/commit/c9ba0ac6ffb12beab635b3c6596697c89abdebae),
+[draft PR #4](https://github.com/esotericode/Skyline/pull/4),
+[CI 38318851217](https://github.com/esotericode/Skyline/actions/runs/38318851217).
+66 Linux / 64 Windows tests, format, Clippy with warnings denied, locked optimized
+workspace builds and shared-version checks pass. Windows offline-cache regression
+is covered; native dialog/layout/runtime acceptance remains open. Testing packaging
+steps were skipped on the feature branch; source is 0.0.2 with no new distribution.
