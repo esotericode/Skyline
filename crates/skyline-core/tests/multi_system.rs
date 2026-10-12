@@ -136,23 +136,24 @@ fn dat_declared_custom_and_extensionless_representations_need_no_new_system_code
             .count(),
         2
     );
-    assert_eq!(
-        records
-            .iter()
-            .filter(|r| r.result.status == Verification::Unsupported)
-            .count(),
-        1
-    );
+    // Neither a ROM type nor a catalog size: an Other file, not read.
+    let other: Vec<_> = records
+        .iter()
+        .filter(|r| r.result.status == Verification::Other)
+        .collect();
+    assert_eq!(other.len(), 1);
+    assert!(other[0].digests.is_none());
 }
 
 #[test]
 fn supported_extensions_without_catalogs_are_unknown_and_never_infer_a_system() {
     let directory = tempfile::tempdir().unwrap();
-    std::fs::write(directory.path().join("Example.nes"), b"unknown").unwrap();
+    // ROM images are binary; text content would be classified as an Other file.
+    std::fs::write(directory.path().join("Example.nes"), b"unknown\0").unwrap();
     let records = scan(directory.path(), vec![]);
     assert_eq!(records[0].result.status, Verification::Unknown);
     assert!(records[0].result.candidates.is_empty());
-    assert_eq!(records[0].digests, Some(digests(b"unknown")));
+    assert_eq!(records[0].digests, Some(digests(b"unknown\0")));
 }
 
 #[test]
@@ -240,6 +241,7 @@ fn system_search_and_filter_preserve_cross_system_ambiguity_and_unknown_rows() {
             digests: Some(digests(b"shared")),
             header: None,
             format: None,
+            header_check: None,
             result: ambiguous,
         },
         FileRecord {
@@ -248,6 +250,7 @@ fn system_search_and_filter_preserve_cross_system_ambiguity_and_unknown_rows() {
             digests: Some(digests(b"unknown")),
             header: None,
             format: None,
+            header_check: None,
             result: index.identify(7, &digests(b"unknown")),
         },
     ];
@@ -517,4 +520,137 @@ fn extensionless_files_are_read_only_when_their_size_matches_a_catalog_entry() {
     // Without any extensionless catalog entry, extensionless files are never read.
     let records = scan(directory.path(), vec![]);
     assert!(records.iter().all(|r| r.digests.is_none()));
+}
+
+#[test]
+fn readmes_artwork_and_saves_are_other_files_not_unknown_roms() {
+    use skyline_core::{
+        systems::collection_systems,
+        view::{other_files, query_rows},
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let write =
+        |name: &str, bytes: &[u8]| std::fs::write(directory.path().join(name), bytes).unwrap();
+    write("notes.md", b"# My collection\n\nSorted by region.\n");
+    write("readme.txt", b"Thanks for downloading");
+    write("boxart.png", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\x01\0");
+    write("Game.sav", &[0_u8; 8192]);
+    // A text file whose size happens to equal a catalog entry is read, still Other.
+    write("manual.txt", b"exactly the size");
+    write(
+        "Unknown.md",
+        &[0x00, 0xff, 0x10, 0x00, 0x53, 0x45, 0x47, 0x41],
+    );
+    // A DAT that lists .txt/.png/.sav files does not make them ROM-like.
+    let pc = catalog(
+        "IBM - PC and Compatibles (Digital)",
+        "Game/readme.txt",
+        b"16 bytes of text",
+    );
+    let save = catalog("Mobile - Palm OS (Digital)", "Game.sav", b"save");
+    let index = CatalogIndex::new(vec![pc, save]);
+    let records = scan_folder(
+        directory.path(),
+        &index,
+        &ScanOptions::default(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap()
+    .records;
+    let status = |name: &str| {
+        let record = records.iter().find(|r| r.display_name() == name).unwrap();
+        (record.result.status.clone(), record.digests.is_some())
+    };
+    assert_eq!(
+        status("notes.md"),
+        (Verification::Other, true),
+        "text, despite .md"
+    );
+    assert_eq!(
+        status("readme.txt"),
+        (Verification::Other, false),
+        "not read"
+    );
+    assert_eq!(status("boxart.png"), (Verification::Other, false));
+    assert_eq!(status("Game.sav"), (Verification::Other, false));
+    assert_eq!(
+        status("manual.txt"),
+        (Verification::Other, true),
+        "size matched"
+    );
+    assert_eq!(
+        status("Unknown.md"),
+        (Verification::Unknown, true),
+        "binary .md"
+    );
+    // Only the binary .md is suggested as a Mega Drive file.
+    let systems = collection_systems(&records, &index.summary());
+    assert_eq!(systems.len(), 1);
+    assert_eq!(
+        (systems[0].name.as_str(), systems[0].suggested_files),
+        ("Mega Drive", 1)
+    );
+    // Other files are hidden unless asked for.
+    assert_eq!(other_files(&records), 5);
+    assert_eq!(query_rows(&records, "", None, Sort::Name, false).len(), 1);
+    assert_eq!(
+        query_rows(&records, "", Some(&Verification::Other), Sort::Name, false).len(),
+        5
+    );
+}
+
+#[test]
+fn cli_scan_can_use_one_dat_folder_without_legacy_manual_imports() {
+    let temp = tempfile::tempdir().unwrap();
+    let database = temp.path().join("cli.sqlite3");
+    let dats = temp.path().join("dats");
+    let roms = temp.path().join("roms");
+    std::fs::create_dir_all(&dats).unwrap();
+    std::fs::create_dir_all(&roms).unwrap();
+    std::fs::write(roms.join("Game.gb"), b"\0game").unwrap();
+    // The same bytes under a legacy manual label and in the folder's DAT.
+    let legacy = temp.path().join("legacy.dat");
+    std::fs::write(&legacy, xml("Nintendo - Game Boy", "Game.gb", b"\0game")).unwrap();
+    std::fs::write(
+        dats.join("gb.dat"),
+        xml("Nintendo - Game Boy (Updated)", "Game.gb", b"\0game"),
+    )
+    .unwrap();
+    let cli = env!("CARGO_BIN_EXE_skyline-cli");
+    let run = |args: &[&std::ffi::OsStr]| {
+        let output = Command::new(cli).args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    run(&[
+        "import".as_ref(),
+        database.as_os_str(),
+        "Game Boy".as_ref(),
+        legacy.as_os_str(),
+    ]);
+    run(&[
+        "import-folder".as_ref(),
+        database.as_os_str(),
+        dats.as_os_str(),
+    ]);
+    let status = |stdout: Vec<u8>| {
+        let records: Vec<FileRecord> = serde_json::from_slice(&stdout).unwrap();
+        records[0].result.status.clone()
+    };
+    // All catalogs: two identities (legacy label and folder) disagree.
+    let all = run(&["scan".as_ref(), database.as_os_str(), roms.as_os_str()]);
+    assert_eq!(status(all), Verification::Ambiguous);
+    let folder = run(&[
+        "scan".as_ref(),
+        database.as_os_str(),
+        roms.as_os_str(),
+        "--dats".as_ref(),
+        dats.as_os_str(),
+    ]);
+    assert_eq!(status(folder), Verification::Exact);
 }

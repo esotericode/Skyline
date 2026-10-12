@@ -38,6 +38,7 @@ fn issue(path: PathBuf, status: Verification, explanation: String) -> FileRecord
         digests: None,
         header: None,
         format: None,
+        header_check: None,
         result: MatchResult {
             status,
             candidates: vec![],
@@ -136,15 +137,25 @@ pub fn scan_folder(
             }
             continue;
         }
-        if !metadata.is_file() || !index.accepts_loose_file(&path, metadata.len()) {
-            let explanation = if !metadata.is_file() {
-                "Only regular loose files can be hashed."
-            } else {
-                unsupported_representation(&path).unwrap_or(
-                    "This extension is not a common loose ROM representation or declared by an active DAT. Import its catalog to enable loose-file checks.",
-                )
-            };
+        if !metadata.is_file() {
+            records.push(issue(
+                path,
+                Verification::Unsupported,
+                "Only regular loose files can be hashed.".into(),
+            ));
+            continue;
+        }
+        if let Some(explanation) = unsupported_representation(&path) {
             records.push(issue(path, Verification::Unsupported, explanation.into()));
+            continue;
+        }
+        if !index.should_read(&path, metadata.len()) {
+            records.push(issue(
+                path,
+                Verification::Other,
+                "Not a ROM file type, and no active catalog lists a file of this size; not read."
+                    .into(),
+            ));
             continue;
         }
         let completed_files = records.len();
@@ -163,14 +174,24 @@ pub fn scan_folder(
         match hashed {
             Ok(hashed) => {
                 hashed_bytes += hashed.size;
-                let result =
-                    index.identify_file(hashed.size, &hashed.digests, hashed.header.as_ref());
+                let (mut result, header_check) =
+                    index.assess(hashed.size, &hashed.digests, hashed.header.as_ref())?;
+                // Unknown is for files that look like ROMs. A readme or artwork that was
+                // read only because its size matched some entry is just another file.
+                if result.candidates.is_empty()
+                    && result.rejected.is_empty()
+                    && (!index.is_rom_like(&path) || hashed.textual)
+                {
+                    result.status = Verification::Other;
+                    result.explanation = "No catalog entry matches, and this does not look like a ROM file by type or content.".into();
+                }
                 records.push(FileRecord {
                     path,
                     size: Some(hashed.size),
                     digests: Some(hashed.digests),
                     header: hashed.header,
                     format: hashed.format,
+                    header_check,
                     result,
                 });
             }

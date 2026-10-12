@@ -119,16 +119,15 @@ fn revisions_of_same_identity_retain_both_sources() {
 }
 
 #[test]
-fn multi_file_and_unsupported_algorithm_candidates_are_inspection_only() {
+fn multi_file_entries_verify_each_file_and_unsupported_algorithms_stay_inspection_only() {
+    // A game may list alternatives (two revisions) or the parts of a set. Each file
+    // is verified on its own; set completeness is noted, not assumed.
     let bytes = dat(
         "<game name=\"Set\"><rom name=\"a.gb\" crc=\"352441c2\"/><rom name=\"b.gb\" crc=\"00000000\"/></game>",
     );
-    assert_eq!(
-        CatalogIndex::new(vec![catalog(&bytes)])
-            .identify(3, &hashes())
-            .status,
-        Verification::Unsupported
-    );
+    let result = CatalogIndex::new(vec![catalog(&bytes)]).identify(3, &hashes());
+    assert_eq!(result.status, Verification::CrcOnly);
+    assert!(result.explanation.contains("one of 2 listed for its game"));
     assert_eq!(
         identify("crc=\"352441c2\" sha512=\"unimplemented\"").status,
         Verification::Unsupported
@@ -229,7 +228,8 @@ fn recursive_scan_preserves_sources_excludes_prefixes_and_records_unsupported() 
     for path in ["known.gb", "nested/duplicate.GBC", "skip/excluded.gb"] {
         std::fs::write(directory.path().join(path), b"abc").unwrap();
     }
-    std::fs::write(directory.path().join("unknown.gb"), b"xyz").unwrap();
+    // ROM images are binary; text content would be classified as an Other file.
+    std::fs::write(directory.path().join("unknown.gb"), b"x\0z").unwrap();
     std::fs::write(directory.path().join("archive.zip"), b"not actually a zip").unwrap();
     let index = CatalogIndex::new(vec![catalog(&dat(&rom(
         "Synthetic",
@@ -374,6 +374,7 @@ fn database_roundtrip_retains_immutable_snapshot_and_completed_collection() {
         digests: Some(hashes()),
         header: None,
         format: None,
+        header_check: None,
         result: identify("crc=\"352441c2\""),
     };
     store.save_completed_scan(&[record]).unwrap();
@@ -446,6 +447,7 @@ fn view_search_filter_and_sort_use_original_and_reference_names() {
         digests: Some(hashes()),
         header: None,
         format: None,
+        header_check: None,
         result,
     };
     let rows = vec![
@@ -555,6 +557,7 @@ fn view_sorts_names_case_insensitively_and_status_by_strength() {
         digests: Some(hashes()),
         header: None,
         format: None,
+        header_check: None,
         result,
     };
     let unknown = || CatalogIndex::new(vec![]).identify(3, &hashes());

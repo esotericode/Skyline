@@ -162,3 +162,116 @@ fn nes_trainer_is_not_removed_and_n64_signature_describes_byte_layout() {
         assert!(record.format.unwrap().name.contains(label));
     }
 }
+
+/// A No-Intro-style pair: the Headered set hashes the whole file and records the
+/// canonical header bytes; the Headerless set hashes only the content (`.unh`).
+fn nes_pair(content: &[u8], canonical: &[u8]) -> Vec<skyline_core::model::Catalog> {
+    let catalog = |name: &str, rom: String| {
+        parse_dat(
+            format!("<datafile><header><name>{name}</name></header><game name=\"Synthetic (World)\">{rom}</game></datafile>").as_bytes(),
+            Path::new("nes.dat"),
+            "",
+            &Cancellation::default(),
+        )
+        .unwrap()
+    };
+    let headered = [canonical, content].concat();
+    let (_, whole) = hash_stream(&headered[..], &Cancellation::default(), |_| {}).unwrap();
+    let (_, bare) = hash_stream(content, &Cancellation::default(), |_| {}).unwrap();
+    let hex = canonical
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    vec![
+        catalog(
+            "Nintendo - Nintendo Entertainment System (Headered)",
+            format!(
+                "<rom name=\"Synthetic (World).nes\" size=\"{}\" sha1=\"{}\" header=\"{hex}\"/>",
+                headered.len(),
+                whole.sha1.unwrap()
+            ),
+        ),
+        catalog(
+            "Nintendo - Nintendo Entertainment System (Headerless)",
+            format!(
+                "<rom name=\"Synthetic (World).unh\" size=\"{}\" sha1=\"{}\"/>",
+                content.len(),
+                bare.sha1.unwrap()
+            ),
+        ),
+    ]
+}
+
+fn scan_with(catalogs: Vec<skyline_core::model::Catalog>, bytes: &[u8]) -> FileRecord {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("Game.nes"), bytes).unwrap();
+    scan_folder(
+        temp.path(),
+        &CatalogIndex::new(catalogs),
+        &ScanOptions::default(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap()
+    .records
+    .remove(0)
+}
+
+#[test]
+fn headers_are_compared_with_the_canonical_header_of_the_same_game() {
+    let content: Vec<u8> = (0..24_576_u32).map(|i| (i * 31) as u8).collect();
+    let canonical = [
+        b"NES\x1a".as_slice(),
+        &[1, 1, 0x10, 0x08, 0, 0, 0, 0, 0, 0, 0, 1],
+    ]
+    .concat();
+
+    // Canonical header: whole-file match, header confirmed.
+    let record = scan_with(
+        nes_pair(&content, &canonical),
+        &[canonical.clone(), content.clone()].concat(),
+    );
+    assert_eq!(record.result.status, Verification::Exact);
+    let check = record.header_check.unwrap();
+    assert!(check.differences.is_empty());
+    assert_eq!(check.actual.as_deref(), Some(check.expected.as_str()));
+
+    // Dirty header (old dumps often differ in flag bytes): content matches the
+    // Headerless set, and the comparison names the differing bytes.
+    let mut dirty = canonical.clone();
+    dirty[7] = 0x00;
+    dirty[15] = 0x00;
+    let record = scan_with(
+        nes_pair(&content, &canonical),
+        &[dirty, content.clone()].concat(),
+    );
+    assert_eq!(record.result.status, Verification::Exact);
+    assert!(
+        record
+            .result
+            .explanation
+            .starts_with("Compared without the iNES")
+    );
+    let check = record.header_check.unwrap();
+    assert_eq!(check.differences, [7, 15]);
+    assert!(check.catalog.contains("(Headered)"));
+
+    // No header at all: the content matches, and the canonical header is offered.
+    let record = scan_with(nes_pair(&content, &canonical), &content);
+    assert_eq!(record.result.status, Verification::Exact);
+    let check = record.header_check.unwrap();
+    assert_eq!(check.actual, None);
+    assert!(check.expected.starts_with("4E 45 53 1A"));
+
+    // Free-text header metadata (serials, "!none") is never treated as bytes.
+    let text = scan(
+        "Game.md",
+        &content,
+        "Sega - Mega Drive - Genesis",
+        &content,
+        "T-50086-00",
+    );
+    assert_eq!(text.result.status, Verification::Exact);
+    assert!(text.header_check.is_none());
+}

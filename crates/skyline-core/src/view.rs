@@ -18,6 +18,7 @@ fn status_rank(status: &Verification) -> u8 {
         Verification::Unknown => 3,
         Verification::ReadError => 4,
         Verification::Unsupported => 5,
+        Verification::Other => 6,
     }
 }
 
@@ -113,7 +114,10 @@ fn query_rows_filtered(
         .iter()
         .enumerate()
         .filter(|(id, row)| {
-            if status.is_some_and(|status| row.result.status != *status) {
+            // Other files (readmes, artwork) only appear when asked for by filter.
+            if status.map_or(row.result.status == Verification::Other, |status| {
+                row.result.status != *status
+            }) {
                 return false;
             }
             if !accepts(*id, row) {
@@ -191,4 +195,12 @@ pub fn format_utc(unix_seconds: u64) -> String {
         seconds / 3600,
         seconds % 3600 / 60
     )
+}
+
+/// Rows hidden from the unfiltered view because they are not ROM files.
+pub fn other_files(records: &[FileRecord]) -> usize {
+    records
+        .iter()
+        .filter(|row| row.result.status == Verification::Other)
+        .count()
 }

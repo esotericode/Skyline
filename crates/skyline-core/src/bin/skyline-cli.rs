@@ -3,7 +3,6 @@ use skyline_core::{
     VERSION,
     catalog::import_path,
     hash::Cancellation,
-    matching::CatalogIndex,
     scan::{ScanOptions, scan_folder},
     store::Store,
 };
@@ -28,9 +27,22 @@ fn main() -> Result<()> {
         }
         Some("scan") if args.len() >= 3 => {
             let mut store = Store::open(Path::new(&args[1]))?;
-            let index = CatalogIndex::new(store.active_catalogs(None)?);
+            for warning in store.warnings() {
+                eprintln!("warning: {warning}");
+            }
+            // `--dats <folder>` scans against that DAT folder only, as the desktop does.
+            let mut rest = &args[3..];
+            let mut dats = None;
+            if rest.first().map(String::as_str) == Some("--dats") {
+                let Some(folder) = rest.get(1) else {
+                    bail!("--dats needs a DAT folder");
+                };
+                dats = Some(Path::new(folder));
+                rest = &rest[2..];
+            }
+            let index = store.catalog_index(dats)?;
             let options = ScanOptions {
-                exclusions: args[3..].iter().map(Into::into).collect(),
+                exclusions: rest.iter().map(Into::into).collect(),
             };
             let report = scan_folder(Path::new(&args[2]), &index, &options, &cancel, |_| {})?;
             if report.cancelled {
@@ -41,7 +53,7 @@ fn main() -> Result<()> {
         }
         _ => {
             eprintln!(
-                "Skyline {VERSION}\nUsage:\n  skyline-cli --version\n  skyline-cli import <database> <system|auto> <DAT>\n  skyline-cli import-folder <database> <DAT-folder>\n  skyline-cli scan <database> <folder> [excluded-relative-prefix ...]\nUse auto to take the system label from the DAT header. Scans use all imported catalogs.\nAll scans force rehash and are read-only. The database stores the last completed scan."
+                "Skyline {VERSION}\nUsage:\n  skyline-cli --version\n  skyline-cli import <database> <system|auto> <DAT>\n  skyline-cli import-folder <database> <DAT-folder>\n  skyline-cli scan <database> <folder> [--dats <DAT-folder>] [excluded-relative-prefix ...]\nUse auto to take the system label from the DAT header. Scans use all imported catalogs,\nor only those of one indexed DAT folder with --dats.\nAll scans force rehash and are read-only. The database stores the last completed scan."
             );
             if !args.is_empty() {
                 bail!("Invalid command or arguments");

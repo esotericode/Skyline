@@ -15,7 +15,7 @@ use std::{
 pub const MAX_DAT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 1_000_000;
 /// Increment whenever parsing semantics change so saved derived entries are refreshed.
-pub const PARSER_REVISION: i64 = 2;
+pub const PARSER_REVISION: i64 = 3;
 const MAX_TEXT: usize = 8192;
 /// Known Logiqx/No-Intro/MAME ROM attributes that describe an entry without changing
 /// which bytes the digests cover. Real DATs carry these on ordinary single-file entries.
@@ -146,6 +146,16 @@ fn digest(attributes: &BTreeMap<String, String>, key: &str, len: usize) -> Resul
         .transpose()
 }
 
+/// The dump flag a raw Logiqx `status` value denotes.
+pub(crate) fn quality_of(raw_status: &str) -> DumpQuality {
+    match raw_status {
+        "good" => DumpQuality::Good,
+        "baddump" => DumpQuality::Suspect,
+        "nodump" => DumpQuality::Undumped,
+        _ => DumpQuality::Unspecified,
+    }
+}
+
 fn entry(attributes: &BTreeMap<String, String>, game: &str) -> Result<CatalogEntry> {
     let filename = attributes
         .get("name")
@@ -153,13 +163,7 @@ fn entry(attributes: &BTreeMap<String, String>, game: &str) -> Result<CatalogEnt
         .context("ROM is missing a name")?
         .clone();
     let raw_status = attributes.get("status").cloned().unwrap_or_default();
-    let quality = match raw_status.as_str() {
-        "good" => DumpQuality::Good,
-        "baddump" => DumpQuality::Suspect,
-        "nodump" => DumpQuality::Undumped,
-        "" => DumpQuality::Unspecified,
-        _ => DumpQuality::Unspecified,
-    };
+    let quality = quality_of(&raw_status);
     Ok(CatalogEntry {
         game: game.into(),
         filename,

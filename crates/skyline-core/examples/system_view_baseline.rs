@@ -43,6 +43,7 @@ fn main() -> anyhow::Result<()> {
                     digests: Some(digests.clone()),
                     header: None,
                     format: None,
+                    header_check: None,
                     result: if id % 5 == 0 {
                         MatchResult {
                             status: Verification::Unknown,
@@ -57,7 +58,7 @@ fn main() -> anyhow::Result<()> {
             })
             .collect();
         let start = Instant::now();
-        let systems = collection_systems(&rows, &catalogs);
+        let systems = collection_systems(&rows, &index.summary());
         let grouping_ms = start.elapsed().as_secs_f64() * 1000.0;
         let selected = systems
             .iter()

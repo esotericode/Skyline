@@ -1,4 +1,4 @@
-use crate::model::{Catalog, FileFormat};
+use crate::model::FileFormat;
 use std::{borrow::Cow, collections::BTreeSet, path::Path};
 
 /// Import labels are suggestions, not a restriction on supported systems. An empty
@@ -35,13 +35,15 @@ pub const SYSTEM_PRESETS: &[&str] = &[
 
 /// Common loose representations can be fingerprinted even without an imported
 /// catalog. Extensions only decide what to read; identity comes from byte evidence.
+/// Any other file is read only when its size equals a catalog entry's size.
 pub const LOOSE_EXTENSIONS: &[&str] = &[
     "gb", "gbc", "gba", "nes", "sfc", "smc", "swc", "fig", "n64", "z64", "v64", "nds", "vb", "md",
     "gen", "smd", "sms", "gg", "sg", "pce", "sgx", "a26", "a52", "a78", "j64", "jag", "lnx", "ngp",
-    "ngc", "ws", "wsc", "col", "cv", "vec", "sv", "rom", "bin",
+    "ngc", "ws", "wsc", "col", "cv", "vec", "sv", "rom", "bin", "unh", "lyx", "fds", "qd", "ndd",
+    "32x", "min",
 ];
 
-fn extension(path: &Path) -> Cow<'_, str> {
+pub(crate) fn extension(path: &Path) -> Cow<'_, str> {
     let extension = path.extension().unwrap_or_default().to_string_lossy();
     if extension.bytes().any(|byte| byte.is_ascii_uppercase()) {
         Cow::Owned(extension.to_ascii_lowercase())
@@ -249,55 +251,138 @@ pub fn header_notes(record: &crate::model::FileRecord) -> Vec<String> {
     notes
 }
 
-pub(crate) struct LooseFilePolicy {
-    extensions: BTreeSet<String>,
-    extensionless_sizes: BTreeSet<u64>,
-    unsized_names: BTreeSet<String>,
+/// Whether a path has a common loose ROM extension.
+pub fn is_rom_extension(path: &Path) -> bool {
+    LOOSE_EXTENSIONS.contains(&extension(path).as_ref())
 }
 
-impl LooseFilePolicy {
-    pub(crate) fn from_catalogs(catalogs: &[Catalog]) -> Self {
-        let mut extensions: BTreeSet<_> = LOOSE_EXTENSIONS
-            .iter()
-            .map(|extension| (*extension).to_owned())
-            .collect();
-        let mut extensionless_sizes = BTreeSet::new();
-        let mut unsized_names = BTreeSet::new();
-        for catalog in catalogs {
-            for entry in &catalog.entries {
-                let extension = extension(Path::new(&entry.filename));
-                if extension.is_empty() {
-                    if let Some(size) = entry.size {
-                        extensionless_sizes.insert(size);
-                    } else if let Some(name) = entry.filename.rsplit(['/', '\\']).next() {
-                        unsized_names.insert(name.to_lowercase());
-                    }
-                    continue;
-                }
-                if unsupported_extension(&extension).is_none()
-                    && !extensions.contains(extension.as_ref())
-                {
-                    // Unusual extensions declared by a DAT are valid evidence.
-                    extensions.insert(extension.into_owned());
-                }
-            }
-        }
-        Self {
-            extensions,
-            extensionless_sizes,
-            unsized_names,
-        }
+/// Whether the first bytes of a file read as text. ROM images carry binary data
+/// (vectors, padding, NUL bytes) at the start; a readme saved as `notes.md` does not.
+pub fn looks_textual(prefix: &[u8]) -> bool {
+    if prefix.is_empty() || prefix.contains(&0) {
+        return false;
     }
+    let text = match std::str::from_utf8(prefix) {
+        Ok(text) => text,
+        // The prefix may end inside a multi-byte character.
+        Err(error) if error.valid_up_to() + 4 > prefix.len() => {
+            std::str::from_utf8(&prefix[..error.valid_up_to()]).unwrap_or_default()
+        }
+        Err(_) => return false,
+    };
+    let control = text
+        .chars()
+        .filter(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        .count();
+    !text.is_empty() && control * 20 <= text.chars().count()
+}
 
-    pub(crate) fn accepts(&self, path: &Path, size: u64) -> bool {
-        let extension = extension(path);
-        if extension.is_empty() {
-            return self.extensionless_sizes.contains(&size)
-                || path.file_name().is_some_and(|name| {
-                    self.unsized_names
-                        .contains(&name.to_string_lossy().to_lowercase())
-                });
-        }
-        unsupported_extension(&extension).is_none() && self.extensions.contains(extension.as_ref())
-    }
+/// No-Intro `header` attributes are either the exact header bytes as spaced hex
+/// (NES Headered, C64 CRT) or free text such as a serial or `!none`. Only the hex
+/// form describes bytes, so only that form is compared with a file.
+pub fn header_bytes(attribute: &str) -> Option<Vec<u8>> {
+    let bytes: Option<Vec<u8>> = attribute
+        .split_ascii_whitespace()
+        .map(|pair| {
+            (pair.len() == 2)
+                .then(|| u8::from_str_radix(pair, 16).ok())
+                .flatten()
+        })
+        .collect();
+    bytes.filter(|bytes| !bytes.is_empty())
+}
+
+/// Spaced uppercase hex, the form No-Intro uses for header attributes.
+pub fn spaced_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Everyday document, media, save and program file types. Some DATs list such files
+/// (PC and digital-store sets), but in a ROM folder they are readmes, artwork, saves and
+/// tools, so a DAT declaring them does not make them ROM-like.
+pub fn is_common_non_rom(extension: &str) -> bool {
+    matches!(
+        extension,
+        "txt"
+            | "nfo"
+            | "diz"
+            | "md"
+            | "markdown"
+            | "pdf"
+            | "doc"
+            | "docx"
+            | "rtf"
+            | "odt"
+            | "html"
+            | "htm"
+            | "xml"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "ini"
+            | "cfg"
+            | "conf"
+            | "log"
+            | "csv"
+            | "tsv"
+            | "dat"
+            | "sfv"
+            | "md5"
+            | "sha1"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "bmp"
+            | "webp"
+            | "tif"
+            | "tiff"
+            | "ico"
+            | "svg"
+            | "dds"
+            | "mp3"
+            | "wav"
+            | "flac"
+            | "ogg"
+            | "m4a"
+            | "aac"
+            | "opus"
+            | "mid"
+            | "midi"
+            | "mp4"
+            | "mkv"
+            | "avi"
+            | "mov"
+            | "webm"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "bat"
+            | "cmd"
+            | "sh"
+            | "ps1"
+            | "py"
+            | "pyc"
+            | "js"
+            | "lnk"
+            | "url"
+            | "db"
+            | "sqlite"
+            | "sqlite3"
+            | "tmp"
+            | "bak"
+            | "sav"
+            | "srm"
+            | "state"
+            | "m3u"
+            | "pls"
+            | "ttf"
+            | "otf"
+    )
 }

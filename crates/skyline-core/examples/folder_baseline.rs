@@ -1,6 +1,6 @@
 //! Optional local inputs; never bundles third-party catalogs or ROMs.
 use anyhow::{Context, Result};
-use skyline_core::{hash::Cancellation, matching::CatalogIndex, store::Store};
+use skyline_core::{hash::Cancellation, store::Store};
 use std::{path::PathBuf, time::Instant};
 
 fn main() -> Result<()> {
@@ -18,9 +18,12 @@ fn main() -> Result<()> {
             eprintln!("{}: {}", issue.path.display(), issue.explanation);
         }
         let intake_ms = start.elapsed().as_secs_f64() * 1000.0;
+        // The app's path: open the indexed lookup for this folder's catalogs.
         let start = Instant::now();
+        let index = store.catalog_index(Some(&folder))?;
+        let index_ms = start.elapsed().as_secs_f64() * 1000.0;
+        // Full entry loading is only for choosing lookup samples; it is not timed.
         let catalogs = store.active_catalogs(Some(&folder))?;
-        let load_ms = start.elapsed().as_secs_f64() * 1000.0;
         let samples: Vec<_> = catalogs
             .iter()
             .filter_map(|catalog| {
@@ -35,9 +38,8 @@ fn main() -> Result<()> {
                 ))
             })
             .collect();
+        drop(catalogs);
         let start = Instant::now();
-        let index = CatalogIndex::new(catalogs);
-        let index_ms = start.elapsed().as_secs_f64() * 1000.0;
         // Metadata lookup check only: no commercial ROM bytes are obtained or verified.
         for (sha, size, digests) in &samples {
             assert!(
@@ -48,8 +50,9 @@ fn main() -> Result<()> {
                     .any(|candidate| &candidate.catalog_sha256 == sha)
             );
         }
+        let lookup_ms = start.elapsed().as_secs_f64() * 1000.0;
         println!(
-            "{pass}: files={} catalogs={} entries={} parsed={} cached={} issues={} intake_ms={intake_ms:.2} load_ms={load_ms:.2} index_ms={index_ms:.2} metadata_lookup_catalogs={}",
+            "{pass}: files={} catalogs={} entries={} parsed={} cached={} issues={} intake_ms={intake_ms:.2} index_open_ms={index_ms:.2} lookups_ms={lookup_ms:.2} metadata_lookup_catalogs={}",
             report.discovered,
             report.catalogs,
             report.entries,

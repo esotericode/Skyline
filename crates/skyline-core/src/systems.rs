@@ -1,5 +1,5 @@
 //! Presentation grouping only. Neither a DAT label nor an extension verifies a ROM.
-use crate::model::{Catalog, FileRecord};
+use crate::model::{CatalogInfo, FileRecord, Verification};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -100,27 +100,23 @@ pub struct CollectionSystem {
     pub rows: BTreeSet<usize>,
 }
 
-/// Only systems with collection rows appear. Unknown filenames supply labelled
-/// hints so a missing GBA DAT can be useful feedback; they remain Unknown.
-pub fn collection_systems(records: &[FileRecord], catalogs: &[Catalog]) -> Vec<CollectionSystem> {
+/// Catalog metadata and extension hints: everything presentation needs from the
+/// references, without their entries.
+#[derive(Clone, Debug, Default)]
+pub struct ReferenceSummary {
+    pub catalogs: Vec<CatalogInfo>,
+    /// Lowercase entry extension to the system families whose catalogs use it.
+    pub extension_families: BTreeMap<String, BTreeSet<String>>,
+}
+
+/// Only systems with collection rows appear. Unknown files supply labelled hints so a
+/// missing GBA DAT can be useful feedback; they remain Unknown. Other files (readmes,
+/// artwork) never receive a system hint.
+pub fn collection_systems(
+    records: &[FileRecord],
+    references: &ReferenceSummary,
+) -> Vec<CollectionSystem> {
     let mut systems: BTreeMap<String, CollectionSystem> = BTreeMap::new();
-    // New/obscure catalogs supply hints automatically when an extension belongs
-    // to exactly one family. Shared generic extensions never force a system guess.
-    let mut hints: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
-    for catalog in catalogs {
-        let family = system_family(&catalog.provenance.system);
-        for entry in &catalog.entries {
-            if let Some(extension) = Path::new(&entry.filename)
-                .extension()
-                .and_then(|s| s.to_str())
-            {
-                hints
-                    .entry(extension.to_ascii_lowercase())
-                    .or_default()
-                    .insert(family);
-            }
-        }
-    }
     for (id, record) in records.iter().enumerate() {
         let mut seen = BTreeSet::new();
         for candidate in &record.result.candidates {
@@ -139,6 +135,11 @@ pub fn collection_systems(records: &[FileRecord], catalogs: &[Catalog]) -> Vec<C
                 .used_catalogs
                 .insert(candidate.catalog_sha256.clone());
         }
+        if record.result.status != Verification::Unknown || !record.result.candidates.is_empty() {
+            continue;
+        }
+        // New/obscure catalogs supply hints automatically when an extension belongs
+        // to exactly one family. Shared generic extensions never force a system guess.
         let hint = system_hint(&record.path).or_else(|| {
             let extension = record.path.extension()?.to_str()?.to_ascii_lowercase();
             // bin/rom/img/raw/wav are generic even when the folder only happens
@@ -146,12 +147,10 @@ pub fn collection_systems(records: &[FileRecord], catalogs: &[Catalog]) -> Vec<C
             if matches!(extension.as_str(), "bin" | "rom" | "img" | "raw" | "wav") {
                 return None;
             }
-            let families = hints.get(&extension)?;
-            (families.len() == 1).then(|| *families.first().unwrap())
+            let families = references.extension_families.get(&extension)?;
+            (families.len() == 1).then(|| families.first().unwrap().as_str())
         });
-        if record.result.candidates.is_empty()
-            && let Some(hint) = hint
-        {
+        if let Some(hint) = hint {
             let system = systems
                 .entry(hint.into())
                 .or_insert_with(|| CollectionSystem {
@@ -162,8 +161,8 @@ pub fn collection_systems(records: &[FileRecord], catalogs: &[Catalog]) -> Vec<C
             system.rows.insert(id);
         }
     }
-    for catalog in catalogs {
-        if !catalog.entries.is_empty()
+    for catalog in &references.catalogs {
+        if catalog.entry_count > 0
             && let Some(system) = systems.get_mut(system_family(&catalog.provenance.system))
         {
             system.available_catalogs += 1;

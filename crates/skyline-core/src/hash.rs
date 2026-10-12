@@ -1,5 +1,7 @@
 use crate::{
-    formats::{HeaderRule, MAX_HEADER_BYTES, detect_header, inspect_format},
+    formats::{
+        HeaderRule, MAX_HEADER_BYTES, detect_header, inspect_format, looks_textual, spaced_hex,
+    },
     model::{Digests, FileFormat, HeaderEvidence},
 };
 use anyhow::{Context, Result, bail};
@@ -83,6 +85,8 @@ pub struct Hashed {
     pub digests: Digests,
     pub header: Option<HeaderEvidence>,
     pub format: Option<FileFormat>,
+    /// The first bytes read as text, so an unmatched file is not presented as a ROM.
+    pub textual: bool,
 }
 
 /// One pass over the bytes. `header` sees up to the first `MAX_HEADER_BYTES` bytes
@@ -110,6 +114,11 @@ pub fn hash_stream_with_header(
     }
     // A header must be followed by content; a file that is only a header has none.
     let rule = header(&buffer[..filled]).filter(|rule| rule.bytes < filled);
+    let textual = looks_textual(&buffer[..filled]);
+    // Short headers are kept for comparison with catalog header metadata.
+    let header_hex = rule
+        .filter(|rule| rule.bytes <= 128)
+        .map(|rule| spaced_hex(&buffer[..rule.bytes]));
     let mut whole = Hashers::new();
     let mut content = rule.map(|_| Hashers::new());
     whole.update(&buffer[..filled]);
@@ -140,12 +149,14 @@ pub fn hash_stream_with_header(
         header_bytes: rule.bytes as u64,
         size: size - rule.bytes as u64,
         digests: content.finish(),
+        bytes: header_hex,
     });
     Ok(Hashed {
         size,
         digests: whole.finish(),
         header,
         format: None,
+        textual,
     })
 }
 

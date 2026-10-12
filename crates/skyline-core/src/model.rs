@@ -65,6 +65,27 @@ pub struct Catalog {
     pub entries: Vec<CatalogEntry>,
 }
 
+/// Catalog metadata without its entries. Entries live in the indexed reference
+/// database and are looked up per scanned file, so the app never holds them all.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CatalogInfo {
+    pub name: String,
+    pub version: String,
+    pub provenance: Provenance,
+    pub entry_count: usize,
+}
+
+impl CatalogInfo {
+    pub fn of(catalog: &Catalog) -> Self {
+        Self {
+            name: catalog.name.clone(),
+            version: catalog.version.clone(),
+            provenance: catalog.provenance.clone(),
+            entry_count: catalog.entries.len(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Verification {
     Exact,
@@ -73,6 +94,8 @@ pub enum Verification {
     Unknown,
     ReadError,
     Unsupported,
+    /// Not a ROM representation and no catalog entry matched (readme, artwork, saves).
+    Other,
 }
 
 impl Verification {
@@ -84,6 +107,7 @@ impl Verification {
             Self::Unknown => "Unknown",
             Self::ReadError => "Read error",
             Self::Unsupported => "Unsupported",
+            Self::Other => "Other file",
         }
     }
 }
@@ -115,6 +139,23 @@ pub struct HeaderEvidence {
     pub header_bytes: u64,
     pub size: u64,
     pub digests: Digests,
+    /// The header itself as spaced hex, for comparison with catalog header metadata.
+    /// Kept only for short headers; absent in records saved before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<String>,
+}
+
+/// Comparison of a file's header with the canonical header a catalog records for the
+/// same game (No-Intro's `header` attribute), e.g. the NES Headered set.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HeaderCheck {
+    /// Canonical header bytes as spaced hex.
+    pub expected: String,
+    /// The file's header bytes, or `None` when the file has no header.
+    pub actual: Option<String>,
+    /// Zero-based offsets where `actual` differs from `expected`.
+    pub differences: Vec<usize>,
+    pub catalog: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -127,6 +168,8 @@ pub struct FileRecord {
     pub header: Option<HeaderEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<FileFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_check: Option<HeaderCheck>,
     pub result: MatchResult,
 }
 

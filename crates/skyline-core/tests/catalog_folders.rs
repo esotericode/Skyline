@@ -71,10 +71,10 @@ fn nested_mixed_folder_uses_every_variant_but_shows_only_collection_systems() {
         ),
         (5, 4, 1, 4)
     );
-    let active = store.active_catalogs(Some(&dats)).unwrap();
+    let index = store.catalog_index(Some(&dats)).unwrap();
     let rows = scan_folder(
         &roms,
-        &CatalogIndex::new(active.clone()),
+        &index,
         &ScanOptions::default(),
         &Cancellation::default(),
         |_| {},
@@ -82,7 +82,7 @@ fn nested_mixed_folder_uses_every_variant_but_shows_only_collection_systems() {
     .unwrap()
     .records;
     assert!(rows.iter().all(|r| r.result.status == Verification::Exact));
-    let systems = collection_systems(&rows, &active);
+    let systems = collection_systems(&rows, &index.summary());
     assert_eq!(
         systems.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
         ["Game Boy Advance", "Nintendo 64"]
@@ -107,7 +107,7 @@ fn nested_mixed_folder_uses_every_variant_but_shows_only_collection_systems() {
 }
 
 #[test]
-fn broken_replacement_retains_previous_then_updates_and_removes_without_losing_history() {
+fn broken_replacement_retains_previous_then_prunes_unused_versions_but_keeps_cited_history() {
     let temp = tempfile::tempdir().unwrap();
     let dats = temp.path().join("dats");
     std::fs::create_dir(&dats).unwrap();
@@ -131,6 +131,21 @@ fn broken_replacement_retains_previous_then_updates_and_removes_without_losing_h
             .snapshot_sha256,
         first.provenance.snapshot_sha256
     );
+    // The saved scan cites the first version, so it stays as evidence after an update.
+    let (size, digests) = hash_stream(&b"old"[..], &Cancellation::default(), |_| {}).unwrap();
+    let result = CatalogIndex::new(vec![first.clone()]).identify(size, &digests);
+    assert_eq!(result.status, Verification::Exact);
+    store
+        .save_completed_scan(&[skyline_core::model::FileRecord {
+            path: "Game.gba".into(),
+            size: Some(size),
+            digests: Some(digests),
+            header: None,
+            format: None,
+            header_check: None,
+            result,
+        }])
+        .unwrap();
     std::fs::write(&path, dat("Game Boy Advance", "Game.gba", b"new")).unwrap();
     let updated = store
         .sync_catalog_folder(&dats, &Cancellation::default(), |_, _, _| {})
@@ -138,13 +153,21 @@ fn broken_replacement_retains_previous_then_updates_and_removes_without_losing_h
     assert_eq!((updated.parsed, updated.catalogs), (1, 1));
     assert_eq!(store.catalogs().unwrap().len(), 2);
     assert!(store.snapshot(&first.provenance.snapshot_sha256).is_ok());
+    let second = store.active_catalogs(Some(&dats)).unwrap().remove(0);
     std::fs::remove_file(&path).unwrap();
     store
         .sync_catalog_folder(&dats, &Cancellation::default(), |_, _, _| {})
         .unwrap();
     assert!(store.active_catalogs(Some(&dats)).unwrap().is_empty());
-    assert_eq!(store.catalogs().unwrap().len(), 2);
     assert!(store.active_catalogs(None).unwrap().is_empty());
+    // The uncited second version is pruned with its snapshot; the cited one remains.
+    let remaining = store.catalogs().unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(
+        remaining[0].provenance.snapshot_sha256,
+        first.provenance.snapshot_sha256
+    );
+    assert!(store.snapshot(&second.provenance.snapshot_sha256).is_err());
     drop(store);
     let store = Store::open(&database).unwrap();
     assert!(store.catalog_folder_report(&dats).unwrap().is_some());
@@ -218,8 +241,9 @@ fn offline_source_keeps_saved_catalogs_and_manual_imports_do_not_override_folder
 #[test]
 fn hints_request_only_missing_relevant_catalogs_and_do_not_verify_or_resolve_ambiguity() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::write(temp.path().join("unknown.gba"), b"unknown").unwrap();
-    std::fs::write(temp.path().join("unknown.bin"), b"unknown").unwrap();
+    // ROM images are binary; text content would be classified as an Other file.
+    std::fs::write(temp.path().join("unknown.gba"), b"unknown\0").unwrap();
+    std::fs::write(temp.path().join("unknown.bin"), b"unknown\0").unwrap();
     let catalog = parse_dat(
         dat("Nintendo - Nintendo 3DS (Encrypted)", "Game.3ds", b"other").as_bytes(),
         Path::new("synthetic.dat"),
@@ -227,16 +251,17 @@ fn hints_request_only_missing_relevant_catalogs_and_do_not_verify_or_resolve_amb
         &Cancellation::default(),
     )
     .unwrap();
+    let index = CatalogIndex::new(vec![catalog]);
     let rows = scan_folder(
         temp.path(),
-        &CatalogIndex::new(vec![catalog.clone()]),
+        &index,
         &ScanOptions::default(),
         &Cancellation::default(),
         |_| {},
     )
     .unwrap()
     .records;
-    let systems = collection_systems(&rows, &[catalog]);
+    let systems = collection_systems(&rows, &index.summary());
     assert_eq!(systems.len(), 1);
     assert_eq!(systems[0].name, "Game Boy Advance");
     assert_eq!(
@@ -523,15 +548,15 @@ fn empty_catalog_and_unspecified_sizes_are_valid_metadata_not_false_matches() {
     )
     .unwrap();
     let index = CatalogIndex::new(vec![catalog]);
-    assert!(index.accepts_loose_file(Path::new("cetk"), 3));
-    assert!(!index.accepts_loose_file(Path::new("LICENSE"), 3));
+    assert!(index.should_read(Path::new("cetk"), 3));
+    assert!(!index.should_read(Path::new("LICENSE"), 3));
 }
 
 #[test]
 fn unknown_future_extension_gets_a_labelled_hint_and_filter_without_verification() {
     use skyline_core::view::query_rows_in_collection_system;
     let temp = tempfile::tempdir().unwrap();
-    std::fs::write(temp.path().join("Unknown.weirdrom"), b"other").unwrap();
+    std::fs::write(temp.path().join("Unknown.weirdrom"), b"other\0").unwrap();
     let catalog = parse_dat(
         dat("New Vendor - Console (Variant)", "Game.weirdrom", b"abc").as_bytes(),
         Path::new("new.dat"),

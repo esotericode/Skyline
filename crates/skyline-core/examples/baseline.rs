@@ -67,6 +67,7 @@ fn main() -> anyhow::Result<()> {
                     digests: Some(digests),
                     header: None,
                     format: None,
+                    header_check: None,
                     result,
                 }
             })

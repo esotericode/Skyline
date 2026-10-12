@@ -4,6 +4,7 @@ pub mod formats;
 pub mod hash;
 pub mod matching;
 pub mod model;
+mod reference;
 pub mod scan;
 pub mod settings;
 pub mod store;

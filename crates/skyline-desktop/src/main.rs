@@ -8,12 +8,11 @@ use skyline_core::{
     VERSION,
     catalog_folder::IntakeReport,
     hash::Cancellation,
-    matching::CatalogIndex,
-    model::{Catalog, FileRecord, Verification},
+    model::{FileRecord, Verification},
     scan::{ScanOptions, ScanProgress, scan_folder},
     settings::{AppSettings, SETTINGS_REVISION},
     store::Store,
-    systems::{CollectionSystem, collection_systems, system_family},
+    systems::{CollectionSystem, ReferenceSummary, collection_systems, system_family},
     view::{Sort, display_path, format_size, format_utc, query_rows_in_collection_system},
 };
 use std::{
@@ -39,7 +38,7 @@ enum Event {
 }
 
 struct LoadedState {
-    catalogs: Arc<Vec<Catalog>>,
+    references: Arc<ReferenceSummary>,
     records: Vec<FileRecord>,
     settings: AppSettings,
     settings_warning: Option<String>,
@@ -49,7 +48,7 @@ struct LoadedState {
 
 struct ReferenceState {
     requested_folder: String,
-    catalogs: Arc<Vec<Catalog>>,
+    references: Arc<ReferenceSummary>,
     intake: Option<IntakeReport>,
     warning: Option<String>,
 }
@@ -66,7 +65,6 @@ enum Job {
     Scan {
         root: PathBuf,
         exclusions: Vec<PathBuf>,
-        catalogs: Arc<Vec<Catalog>>,
         dat_folder: Option<PathBuf>,
     },
     SaveSettings(AppSettings),
@@ -89,7 +87,7 @@ fn run_job(
         match job {
             Job::Load => {
                 let store = Store::open_cancellable(&database, &cancel)?;
-                let (settings, settings_warning) = match store.settings() {
+                let (settings, mut settings_warning) = match store.settings() {
                     Ok(settings) => (settings, None),
                     Err(error) => (
                         AppSettings::default(),
@@ -98,14 +96,22 @@ fn run_job(
                         )),
                     ),
                 };
-                let catalogs = store.active_catalogs(
+                if !store.warnings().is_empty() {
+                    let warnings = store.warnings().join(" · ");
+                    settings_warning = Some(match settings_warning {
+                        Some(previous) => format!("{previous} · {warnings}"),
+                        None => warnings,
+                    });
+                }
+                // Catalog metadata only; entries stay in the indexed database.
+                let references = store.reference_summary(
                     (!settings.dat_folder.is_empty())
                         .then(|| std::path::Path::new(&settings.dat_folder)),
                 )?;
                 let records = store.collection()?;
-                let systems = collection_systems(&records, &catalogs);
+                let systems = collection_systems(&records, &references);
                 Ok(Event::Loaded(Box::new(LoadedState {
-                    catalogs: Arc::new(catalogs),
+                    references: Arc::new(references),
                     records,
                     systems,
                     intake: if settings.dat_folder.is_empty() {
@@ -122,7 +128,7 @@ fn run_job(
                 let intake = sync_references(&mut store, &path, &cancel, &sender, &ctx)?;
                 Ok(Event::References(Box::new(ReferenceState {
                     requested_folder: path.to_string_lossy().into_owned(),
-                    catalogs: Arc::new(store.active_catalogs(Some(&path))?),
+                    references: Arc::new(store.reference_summary(Some(&path))?),
                     intake: Some(intake),
                     warning: None,
                 })))
@@ -130,18 +136,16 @@ fn run_job(
             Job::Scan {
                 root,
                 exclusions,
-                catalogs,
                 dat_folder,
             } => {
                 let mut store = Store::open_cancellable(&database, &cancel)?;
-                let catalogs = if let Some(path) = dat_folder {
+                let index = if let Some(path) = dat_folder {
                     let (intake, warning) =
                         match sync_references(&mut store, &path, &cancel, &sender, &ctx) {
                             Ok(report) => (Some(report), None),
                             Err(error) => {
                                 cancel.check()?;
-                                let cached = store.active_catalogs(Some(&path))?;
-                                if cached.is_empty() {
+                                if store.catalog_infos(Some(&path))?.is_empty() {
                                     return Err(error);
                                 }
                                 (
@@ -152,19 +156,18 @@ fn run_job(
                                 )
                             }
                         };
-                    let active = Arc::new(store.active_catalogs(Some(&path))?);
+                    let index = store.catalog_index(Some(&path))?;
                     sender.send(Event::References(Box::new(ReferenceState {
                         requested_folder: path.to_string_lossy().into_owned(),
-                        catalogs: active.clone(),
+                        references: Arc::new(index.summary()),
                         intake,
                         warning,
                     })))?;
                     ctx.request_repaint();
-                    active
+                    index
                 } else {
-                    catalogs
+                    store.catalog_index(None)?
                 };
-                let index = CatalogIndex::from_shared(catalogs);
                 let mut last_progress = Instant::now() - Duration::from_secs(1);
                 let report = scan_folder(
                     &root,
@@ -242,7 +245,7 @@ fn sync_references(
 
 struct Skyline {
     database: PathBuf,
-    catalogs: Arc<Vec<Catalog>>,
+    references: Arc<ReferenceSummary>,
     records: Vec<FileRecord>,
     visible: Vec<usize>,
     duplicates: HashMap<String, usize>,
@@ -250,6 +253,8 @@ struct Skyline {
     status_filter: Option<Verification>,
     collection_system: Option<String>,
     matched_systems: Vec<CollectionSystem>,
+    /// Rows hidden from the unfiltered table because they are not ROM files.
+    other_files: usize,
     sort: Sort,
     descending: bool,
     selected_row: Option<usize>,
@@ -288,7 +293,7 @@ impl Skyline {
         cc.egui_ctx.set_visuals(visuals);
         let mut app = Self {
             database,
-            catalogs: Arc::new(vec![]),
+            references: Arc::default(),
             records: vec![],
             visible: vec![],
             duplicates: HashMap::new(),
@@ -296,6 +301,7 @@ impl Skyline {
             status_filter: None,
             collection_system: None,
             matched_systems: vec![],
+            other_files: 0,
             sort: Sort::Name,
             descending: false,
             selected_row: None,
@@ -392,7 +398,7 @@ impl Skyline {
                     self.catalog_progress = Some((done, total, path))
                 }
                 Event::Loaded(state) => {
-                    self.catalogs = state.catalogs;
+                    self.references = state.references;
                     self.intake = state.intake;
                     self.apply_settings(&state.settings);
                     self.last_saved_settings = state.settings;
@@ -406,7 +412,7 @@ impl Skyline {
                     self.finish();
                 }
                 Event::References(state) => {
-                    self.catalogs = state.catalogs;
+                    self.references = state.references;
                     self.intake = state.intake;
                     if self.dat_folder.trim() == state.requested_folder
                         && let Some(report) = &self.intake
@@ -417,7 +423,7 @@ impl Skyline {
                     self.refresh_system_catalog_counts();
                     self.status = format!(
                         "{} catalogs ready · variants selected automatically",
-                        self.catalogs.len()
+                        self.references.catalogs.len()
                     );
                     if self.syncing_only {
                         self.finish();
@@ -450,10 +456,10 @@ impl Skyline {
                                 match kind {
                                     PathChoice::Dats => {
                                         self.dat_folder = text;
-                                        self.catalogs = Arc::new(vec![]);
+                                        self.references = Arc::default();
                                         self.intake = None;
                                         self.matched_systems =
-                                            collection_systems(&self.records, &self.catalogs);
+                                            collection_systems(&self.records, &self.references);
                                         sync_folder = true;
                                     }
                                     PathChoice::Folder => self.root_path = text,
@@ -566,6 +572,7 @@ impl Skyline {
 
     fn set_records(&mut self, records: Vec<FileRecord>, systems: Vec<CollectionSystem>) {
         self.matched_systems = systems;
+        self.other_files = skyline_core::view::other_files(&records);
         if self.collection_system.as_ref().is_some_and(|family| {
             !self
                 .matched_systems
@@ -588,10 +595,11 @@ impl Skyline {
     fn refresh_system_catalog_counts(&mut self) {
         for system in &mut self.matched_systems {
             system.available_catalogs = self
+                .references
                 .catalogs
                 .iter()
                 .filter(|catalog| {
-                    !catalog.entries.is_empty()
+                    catalog.entry_count > 0
                         && system_family(&catalog.provenance.system) == system.name
                 })
                 .count();
@@ -651,6 +659,15 @@ impl Skyline {
                     self.visible.len(),
                     self.records.len()
                 ));
+                if self.status_filter.is_none() && self.other_files > 0 {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} other files (readmes, artwork, saves) hidden",
+                            self.other_files
+                        ))
+                        .weak(),
+                    );
+                }
             });
             if let Some((done, total, path)) = &self.catalog_progress {
                 ui.label(format!(
@@ -686,8 +703,8 @@ impl Skyline {
                         self.start(Job::SyncCatalogFolder(self.dat_folder.trim().into()), ctx);
                     }
                 });
-                ui.small(format!("{} catalogs ready", self.catalogs.len()));
-                if self.catalogs.is_empty() && self.dat_folder.is_empty() { ui.small("Choose a DAT folder to identify files. You can also scan first."); }
+                ui.small(format!("{} catalogs ready", self.references.catalogs.len()));
+                if self.references.catalogs.is_empty() && self.dat_folder.is_empty() { ui.small("Choose a DAT folder to identify files. You can also scan first."); }
                 ui.collapsing("Reference details", |ui| {
                     if let Some(report) = &self.intake {
                         ui.small(format!("{} files found · {} parsed · {} cached · {} previous versions retained", report.discovered, report.parsed, report.cached, report.retained));
@@ -695,7 +712,7 @@ impl Skyline {
                         if report.omitted_issues > 0 { ui.label(format!("{} further issues omitted", report.omitted_issues)); }
                     }
                     ui.collapsing("All available catalogs", |ui| {
-                        for catalog in self.catalogs.iter() { ui.small(format!("{} · {}", catalog.name, catalog.version)); }
+                        for catalog in self.references.catalogs.iter() { ui.small(format!("{} · {}", catalog.name, catalog.version)); }
                     });
                 });
                 ui.separator();
@@ -724,7 +741,7 @@ impl Skyline {
                     self.start(Job::Scan {
                         root: self.root_path.trim().into(),
                         exclusions: self.exclusions.lines().map(str::trim).filter(|s| !s.is_empty()).map(Into::into).collect(),
-                        catalogs: self.catalogs.clone(), dat_folder: (!self.dat_folder.trim().is_empty()).then(|| self.dat_folder.trim().into()),
+                        dat_folder: (!self.dat_folder.trim().is_empty()).then(|| self.dat_folder.trim().into()),
                     }, ctx);
                 }
                 ui.small("Every scan rereads file bytes. Original files are preserved.");
@@ -760,6 +777,25 @@ impl Skyline {
                     ui.separator();
                     ui.strong("Format & headers");
                     for note in skyline_core::formats::header_notes(record) { ui.label(note); }
+                    if let Some(check) = &record.header_check {
+                        ui.add_space(4.0);
+                        match &check.actual {
+                            Some(_) if check.differences.is_empty() => {
+                                ui.label(RichText::new("Header matches the canonical header").color(status_color(&Verification::Exact)));
+                            }
+                            Some(actual) => {
+                                let offsets = check.differences.iter().map(usize::to_string).collect::<Vec<_>>().join(", ");
+                                ui.label(RichText::new(format!("Header differs from the canonical header at byte {offsets}")).color(status_color(&Verification::CrcOnly)));
+                                ui.label("This file's header");
+                                ui.monospace(actual);
+                            }
+                            None => {
+                                ui.label(RichText::new("No header in this file; the canonical header is below").color(status_color(&Verification::CrcOnly)));
+                            }
+                        }
+                        ui.label(format!("Canonical header ({})", check.catalog));
+                        ui.monospace(&check.expected);
+                    }
                     if let Some(size) = record.size {
                         ui.label(format!("{} ({size} bytes)", format_size(size)));
                     }
@@ -852,7 +888,7 @@ impl Skyline {
                             }
                             ui.label("Snapshot SHA-256");
                             ui.monospace(&candidate.catalog_sha256);
-                            if let Some(catalog) = self.catalogs.iter().find(|catalog| {
+                            if let Some(catalog) = self.references.catalogs.iter().find(|catalog| {
                                 catalog.provenance.snapshot_sha256 == candidate.catalog_sha256
                                     && catalog.provenance.system == candidate.system
                             }) {
@@ -1166,13 +1202,14 @@ impl Skyline {
 const ROW_HEIGHT: f32 = 30.0;
 const HEADER_HEIGHT: f32 = 28.0;
 const CELL_PADDING: f32 = 8.0;
-const STATUSES: [Verification; 6] = [
+const STATUSES: [Verification; 7] = [
     Verification::Exact,
     Verification::CrcOnly,
     Verification::Ambiguous,
     Verification::Unknown,
     Verification::ReadError,
     Verification::Unsupported,
+    Verification::Other,
 ];
 
 /// Status text always accompanies the color; the color only speeds up scanning.
@@ -1184,6 +1221,7 @@ fn status_color(status: &Verification) -> Color32 {
         Verification::Unknown => Color32::from_rgb(160, 170, 184),
         Verification::ReadError => Color32::from_rgb(244, 136, 120),
         Verification::Unsupported => Color32::from_rgb(132, 142, 156),
+        Verification::Other => Color32::from_rgb(112, 120, 132),
     }
 }
 

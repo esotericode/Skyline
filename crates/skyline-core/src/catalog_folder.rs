@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const MAX_FOLDER_FILES: usize = 4096;
-pub const MAX_FOLDER_BYTES: u64 = 256 * 1024 * 1024;
-pub const MAX_FOLDER_ENTRIES: usize = 2_000_000;
+pub const MAX_FOLDER_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const MAX_FOLDER_ENTRIES: usize = 10_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IntakeIssue {

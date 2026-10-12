@@ -59,6 +59,7 @@ fn v1_database(path: &Path, imported: &ImportedCatalog) -> FileRecord {
         digests: Some(digests),
         header: None,
         format: None,
+        header_check: None,
         result,
     };
     connection
@@ -112,12 +113,12 @@ fn migration_refreshes_cached_entries_preserving_snapshots_provenance_and_histor
         connection
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
 }
 
 #[test]
-fn failed_migration_rolls_back_schema_and_keeps_existing_collection() {
+fn failed_refresh_keeps_previous_entries_and_never_blocks_opening() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("broken.sqlite3");
     let imported = imported();
@@ -129,39 +130,36 @@ fn failed_migration_rolls_back_schema_and_keeps_existing_collection() {
             [b"different snapshot".as_slice()],
         )
         .unwrap();
-    let old_json: String = connection
-        .query_row("SELECT json FROM catalogs", [], |r| r.get(0))
-        .unwrap();
     drop(connection);
-    assert!(Store::open(&path).is_err());
-    let connection = Connection::open(path).unwrap();
+    // A catalog that cannot be re-derived must not lock the user out of their data.
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.warnings().len(), 1);
+    assert!(store.warnings()[0].contains("previous entries kept"));
+    let catalogs = store.catalogs().unwrap();
+    assert_eq!(catalogs.len(), 1);
     assert_eq!(
-        connection
-            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
-    assert!(
-        connection
-            .prepare("SELECT parser_revision FROM catalogs")
-            .is_err()
+        catalogs[0].entries[0].unsupported_algorithms,
+        ["serial", "mia", "header"],
+        "the entries saved before the failed refresh are kept as they were"
     );
     assert_eq!(
-        connection
-            .query_row("SELECT json FROM catalogs", [], |r| r.get::<_, String>(0))
-            .unwrap(),
-        old_json
+        serde_json::to_value(store.collection().unwrap()).unwrap(),
+        serde_json::to_value(vec![previous]).unwrap()
     );
-    let row: FileRecord = serde_json::from_str(
-        &connection
-            .query_row("SELECT json FROM collection", [], |r| r.get::<_, String>(0))
-            .unwrap(),
-    )
-    .unwrap();
+    drop(store);
+    // The stale catalog keeps its old revision so a later open retries the refresh.
+    let connection = Connection::open(&path).unwrap();
     assert_eq!(
-        serde_json::to_value(row).unwrap(),
-        serde_json::to_value(previous).unwrap()
+        connection
+            .query_row("SELECT parser_revision FROM catalogs", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
     );
+    drop(connection);
+    let reopened = Store::open(&path).unwrap();
+    assert_eq!(reopened.warnings().len(), 1);
+    assert_eq!(reopened.catalogs().unwrap()[0].entries.len(), 1);
 }
 
 #[test]
