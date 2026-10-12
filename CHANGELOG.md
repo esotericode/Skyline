@@ -14,6 +14,7 @@
   entries Unsupported; Windows OneDrive/deduplicated files are no longer skipped as
   links; the collection is a sortable, status-colored table with keyboard navigation
   and responsive columns; readable sizes, dates and Windows paths in details.
+- Commit-labelled Windows/Linux development builds from CI on `main`.
 - Wayland sessions are supported natively; a failed start shows an error dialog on
   Windows instead of exiting silently.
 

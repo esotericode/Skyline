@@ -20,6 +20,18 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo run --locked -p skyline-desktop
 ```
 
+## Development builds
+
+Every push to `main` that passes CI uploads Windows x64 and Linux x64 builds as
+artifacts on that [Actions run](https://github.com/esotericode/Skyline/actions/workflows/ci.yml)
+(signed-in GitHub users; kept 30 days). They are named
+`Skyline-v<version>-dev.<commit>-<platform>`, include `BUILD-INFO.txt` and
+`SHA256SUMS.txt`, and are development snapshots, not releases. Builds are unsigned, so
+Windows SmartScreen may warn before the first launch. Windows: extract and run
+`Skyline.exe` (needs OpenGL 2 or newer). Linux: extract the `.tar.gz` and run `Skyline`
+(X11 or Wayland, OpenGL and libxkbcommon). Package locally after a release build with
+`scripts/package-dev-build.sh <windows-x64|linux-x64>`.
+
 ## Try it
 
 1. Select Game Boy or Game Boy Color in the sidebar, browse to a local UTF-8 XML DAT

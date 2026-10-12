@@ -20,3 +20,9 @@ incomplete milestones only when their release notes clearly state those limits.
 This change establishes source version 0.0.1 without creating a release, tag,
 installer or testing distribution. Routine CI checks source commits and does not
 publish distinct releases. Do not claim a checklist passed because a build compiled.
+
+Development builds: CI on `main` (or a manual run) packages the checked release
+binaries as Actions artifacts named `Skyline-vX.Y.Z-dev.<commit>-<platform>` with
+build info and checksums. The commit label keeps each binary distinct, so these do
+not reuse a release version. They are not releases: no tag, GitHub Release or
+installer is created, and the release checklist above still applies before one is.

@@ -31,3 +31,17 @@ jobs:
         run: |
           version=$(cargo metadata --locked --no-deps --format-version 1 | python -c 'import json,sys; p=json.load(sys.stdin)["packages"]; v={x["version"] for x in p}; assert len(v)==1; print(v.pop())')
           test "$(target/release/skyline-cli --version)" = "Skyline $version"
+      # Development builds from main: commit-labelled CI artifacts, not versioned releases.
+      - name: Package development build
+        id: package
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        shell: bash
+        run: scripts/package-dev-build.sh ${{ runner.os == 'Windows' && 'windows-x64' || 'linux-x64' }} dist
+      - name: Upload development build
+        if: steps.package.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: ${{ steps.package.outputs.path }}
+          retention-days: 30
+          if-no-files-found: error
