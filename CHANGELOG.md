@@ -16,7 +16,19 @@
   unspecified sizes; descriptive No-Intro header metadata no longer blocks NES.
 - Format/header observations, headered/headerless catalog expectations, FDS header
   comparison and N64 signature notes; no payload/header rewriting.
-- Shared immutable catalogs and compact digest index reduce full-folder memory costs.
+- Catalog entries live in indexed database rows and are looked up per scanned file
+  (schema 4, parser 3): with all 250 Fresh1G1R No-Intro DATs the desktop idles at
+  ~93 MB instead of ~700 MB and a scan peaks at ~17 MB instead of ~1 GB.
+- Only ROM-like files are read, plus other files whose size matches a catalog entry.
+  Readmes, artwork, saves and tools are **Other files**, hidden by default, never
+  hinted to a system; text content with a ROM-like extension (`notes.md`) is Other.
+- NES/C64 header metadata is compared with the file: matching, differing offsets, or a
+  missing header with No-Intro's canonical bytes.
+- Each file in a multi-file game entry is verified on its own; set completeness noted.
+- Superseded DAT versions no longer used by a folder, manual import or saved scan are
+  pruned; the database is compacted. Folder limits raised to 2 GiB / 10M entries.
+- A catalog that cannot be re-derived keeps its entries and warns instead of blocking
+  the database from opening. CLI `scan --dats <folder>` scans one DAT folder only.
 - CLI `import-folder`, targeted synthetic regressions and local benchmarks.
 - Shared UI/CLI version advances to 0.0.2 for the next different testing distribution.
 

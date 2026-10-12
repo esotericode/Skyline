@@ -199,3 +199,25 @@ precomputed membership and the desktop's actual active-family query/sort functio
 catalog-derived hint generation run on the worker; the UI retains membership for
 filtering rather than reparsing catalog entries during frames. Rendering, native
 picker/focus/Windows frame/cancellation/steady memory acceptance remain unmeasured.
+
+## Indexed reference database — 2026-10-12
+
+Same Linux development machine, locked release build, all 250 actual Fresh1G1R No-Intro
+DATs (971,723 entries, 214 MiB). Peak memory is `/usr/bin/time` maximum resident size;
+idle memory is the desktop's VmRSS six seconds after start with the full folder.
+
+| Measurement | In-memory catalogs (PR #4 head) | Indexed entries |
+| --- | ---: | ---: |
+| First folder intake | 2.98 s, 305 MiB peak | 13.68 s, 202 MiB peak |
+| Repeat intake (unchanged) | 0.33 s | 0.18 s |
+| Database on disk | 538 MiB | 468 MiB |
+| 15-file mixed scan (CLI) | 2.30 s, 996 MiB peak | 0.30 s, 17 MiB peak |
+| Desktop idle RSS | 687 MiB | 91 MiB |
+| Upgrade of a schema-3 database | n/a | 15.6 s once, 538 → 444 MiB |
+
+First intake is slower because it builds the digest/size indexes once; later refreshes
+parse only changed DATs. Three simulated daily updates of two DATs (including the
+30 MB Wii U CDN set) each took 2.8–4.6 s; superseded versions were pruned and the file
+levelled off as freed pages were reused. Per-file lookup is a handful of indexed
+queries; ROM throughput remains bounded by hashing and storage.
+

@@ -41,13 +41,17 @@ Digest indexes find candidates; comparisons check all supplied supported digests
 and expected size. CRC-only results have reduced confidence, nodump cannot verify,
 and suspect flags survive exact matches. Conflicting identities stay ambiguous.
 Contradictory partial evidence stays Unknown with rejection details; reference
-mismatch requires a future user-selected expectation. Multi-file entries and
-unsupported digest requirements remain read-only/Unsupported. Catalog names retain
+mismatch requires a future user-selected expectation. Each file is verified on its
+own: a game listing several files (alternatives such as revisions, or set parts) notes
+that set completeness is not checked. Unsupported digest requirements remain
+read-only/Unsupported. Entries are indexed database rows looked up per file. Catalog names retain
 raw region/revision/language text; structured metadata extraction is pending.
 
-Recursive scans stream common loose cartridge representations and extensions declared
-by active DAT entries through CRC32/MD5/SHA-1/SHA-256 in one pass. A policy derived
-once per index enables custom extensions, and extensionless files of catalog sizes,
+Recursive scans stream ROM-like files (common loose extensions, plus extensions active
+DATs declare other than everyday document/media/save/program types) through
+CRC32/MD5/SHA-1/SHA-256 in one pass, and any other file only when its size equals an
+active catalog entry's size. Unmatched files that are not ROM-like or read as text are
+Other files, hidden from the default view. This policy enables custom extensions,
 without a system-specific code change. Known archives/disc containers/packages cannot opt into loose checks through
 a DAT. Matching also refuses to verify a container entry by whole-file hashes.
 Recognized copier/emulator headers get a second, header-free digest set in the same

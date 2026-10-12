@@ -17,10 +17,16 @@ verify bytes. Filters narrow browsing without resolving ambiguous identities. Se
 [catalog folders](catalog-folders.md) for cache, errors and activation behavior.
 
 Common loose extensions can be fingerprinted without a DAT (then unmatched bytes
-are Unknown). An active DAT can additionally enable other loose extensions. Extensionless entries
-enable only extensionless files of a matching size (or a DAT-declared basename when size is unspecified). Unrelated extensionless files at other sizes are skipped; matching sizes
-can still cause unrelated files to be read; unspecified sizes use declared basenames. Known archives/disc containers/packages remain Unsupported
-even when listed in a DAT: their contents require dedicated adapters.
+are Unknown). Extensions declared by an active DAT are ROM-like too, so a new
+system's own extension works without an update, except everyday document, media,
+save and program types (txt, png, pdf, sav, exe, json, …) that PC and digital-store
+DATs also list. Any other file, including extensionless ones, is read only when its
+size equals an active catalog entry's size (or its name equals an unsized entry's).
+With a large folder, small unrelated files can share an entry's size and be read;
+that is cheap, and an unmatched file that is not ROM-like or starts with text is an
+**Other file**, not Unknown. Other files are hidden unless the status filter selects
+them, and never receive a system hint. Known archives/disc containers/packages remain
+Unsupported even when listed in a DAT: their contents require dedicated adapters.
 
 | Loose representation family | Common extensions checked |
 | --- | --- |
@@ -55,15 +61,22 @@ The same single read produces whole-file digests and, when a header is recognize
 digests of the bytes after it. Whole-file matches take precedence, so catalogs that
 list headered files behave as before. Only when the whole file has no candidate is
 the header-free content compared; a match then says which header was excluded, and
-the details show both digest sets. The file on disk is never changed. The No-Intro `header` attribute is preserved descriptive metadata, not a transform
-instruction. Headered NES entries verify whole-file hashes normally. N64 byte orders (.v64/.n64),
+the details show both digest sets. The file on disk is never changed. The No-Intro
+`header` attribute is never a transform instruction. When it holds header bytes as
+spaced hex (NES Headered, C64 CRT) those bytes are compared with the file: a
+whole-file match confirms the header; content matched without a header is compared
+with the same game's canonical header from a same-family catalog, reporting matching
+bytes, the differing offsets, or a missing header with the canonical bytes. Free-text
+values (serials, `!none`) are shown but not compared. N64 byte orders (.v64/.n64),
 interleaved Sega files, decryption and padding removal are not handled: such files
 must match the catalog's exact bytes, or they are Unknown, not a claim of corruption.
 Every supplied supported digest and expected size is checked.
 
 One byte fingerprint can have multiple system/release identities. Those remain
 Ambiguous with all candidates visible, including when a system filter is active.
-Multi-file sets and unsupported comparison requirements stay inspection-only.
+Each file is verified on its own; when its game lists several files (alternatives or
+set parts) the explanation says set completeness is not checked. Unsupported
+comparison requirements stay inspection-only.
 
 ## Remaining adapters
 

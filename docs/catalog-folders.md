@@ -53,10 +53,24 @@ a stable parent tree is assumed; hardened descriptor-relative traversal is open.
 ## Bounds and validation
 
 Per-DAT limits remain 64 MiB, one million ROM entries, XML depth 32 and 8 KiB fields.
-One folder refresh permits 4,096 DAT/XML files, 256 MiB successfully read input,
-two million distinct active entries, directory depth 64 and 100,000 filesystem
-entries. Reports retain at most 256 problems plus an omitted count. These limits
-bound prototype jobs and can be revised with measured larger libraries. Unsupported
+One folder refresh permits 4,096 DAT/XML files, 2 GiB successfully read input,
+ten million distinct active entries, directory depth 64 and 100,000 filesystem
+entries. Reports retain at most 256 problems plus an omitted count. Entries live in
+indexed database rows, so memory does not grow with the folder; these limits bound
+job time and can be revised with measured larger libraries.
+
+## Storage, pruning and memory
+
+Catalog entries are stored as indexed rows (binary digests, size) and looked up per
+scanned file; catalog JSON keeps metadata only. The desktop holds catalog metadata and
+extension hints, never entries. After each refresh, catalogs that no folder, manual
+import or saved scan uses any more (typically superseded DAT versions) are removed
+with their snapshots, and the file is compacted once enough space is free. Versions
+cited by the saved scan's evidence stay until a later scan no longer cites them.
+
+A catalog that cannot be re-derived after a parser change keeps its previous entries
+and produces a warning; it never prevents the database from opening. The refresh is
+retried on the next open. Unsupported
 schemas/encodings are recorded per file; there is no automatic download or DTD fetch.
 
 Synthetic tests cover mixed GBA/N64/3DS sources, nested/duplicate copies, both N64

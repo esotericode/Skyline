@@ -126,3 +126,31 @@ passes all 49 tests on Windows/Linux, formatting, lint, locked optimized builds,
 version consistency, packaging and upload of the initial 0.0.1 testing artifacts.
 Native Windows GUI/OneDrive validation remains open. Subsequent validation-record
 changes are documentation only; the tested source is unchanged.
+
+## Review of PR #4 and fixes — 2026-10-12
+
+Reviewed 66cb374..8dabd49 against the actual 250-DAT folder. The Windows offline
+folder-key fix (c9ba0ac) is sound. Fixed on this branch:
+
+- **Non-ROM files read and shown as Unknown.** The read policy was the union of every
+  extension any DAT declares (1,834 in the folder, including txt/png/exe/sav/json), so a
+  readme, artwork, saves or tools were hashed and listed as Unknown, and `notes.md` was
+  suggested as a Mega Drive file. Now ROM-like files are read (common extensions, plus
+  DAT-declared ones except everyday document/media/save/program types), other files
+  only at a catalog entry size; unmatched non-ROM or text files are Other, hidden by
+  default and never hinted.
+- **Memory.** Every active catalog was held as full JSON-derived structs (~700 MB idle,
+  ~1 GB per scan). Entries are now indexed database rows looked up per file.
+- **256 MiB folder cap / unbounded history.** Raised to 2 GiB; superseded versions that
+  nothing uses are pruned and the database compacted.
+- **Header metadata.** Hex `header` values are compared with the file's header.
+- **Multi-file games.** Alternatives such as NES "Bases Loaded" variants were Unsupported;
+  each file is now verified on its own, with set completeness noted.
+- **Upgrade lockout.** A failed re-derivation no longer blocks opening; previous entries
+  stay and a warning is shown.
+- **CLI.** `scan --dats <folder>` isolates one folder from legacy manual imports.
+
+Tests updated where they asserted the old behaviour (history retention without pruning,
+open failure on a bad snapshot, multi-file Unsupported, text-content ROM fixtures); new
+tests cover Other files, header comparison and `--dats`. Measurements in performance.md.
+
