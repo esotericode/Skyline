@@ -147,9 +147,6 @@ pub fn parse_dat(
     if bytes.len() as u64 > MAX_DAT_BYTES {
         bail!("DAT exceeds the 64 MiB import limit");
     }
-    if system.trim().is_empty() {
-        bail!("Select a system explicitly before importing");
-    }
     std::str::from_utf8(bytes).context("Only UTF-8 DAT files are currently supported")?;
     let mut reader = Reader::from_reader(bytes);
     reader.config_mut().check_end_names = true;
@@ -273,6 +270,13 @@ pub fn parse_dat(
     let version = header
         .remove("version")
         .unwrap_or_else(|| "unspecified".into());
+    // The catalog's own system label is preferable to a default Game Boy label.
+    // This is reference metadata; filenames/extensions never establish identity.
+    let system = if system.trim().is_empty() {
+        name.trim().to_owned()
+    } else {
+        system.trim().to_owned()
+    };
     Ok(Catalog {
         name,
         version,
@@ -280,7 +284,7 @@ pub fn parse_dat(
         provenance: Provenance {
             provider: "Local import (publisher not authenticated)".into(),
             origin: origin.into(),
-            system: system.trim().into(),
+            system,
             imported_unix_seconds: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
             format: "Logiqx XML / UTF-8".into(),
             license_reference: None,

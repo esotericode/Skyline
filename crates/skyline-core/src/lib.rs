@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod formats;
 pub mod hash;
 pub mod matching;
 pub mod model;

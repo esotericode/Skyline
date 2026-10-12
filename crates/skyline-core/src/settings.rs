@@ -38,6 +38,7 @@ pub struct AppSettings {
     pub preferred_catalog: Option<CatalogChoice>,
     pub search: String,
     pub status_filter: Option<Verification>,
+    pub collection_system: Option<String>,
     pub sort: Sort,
     pub descending: bool,
 }
@@ -48,10 +49,11 @@ impl Default for AppSettings {
             dat_path: String::new(),
             root_path: String::new(),
             exclusions: String::new(),
-            system: "Game Boy".into(),
+            system: String::new(),
             preferred_catalog: None,
             search: String::new(),
             status_filter: None,
+            collection_system: None,
             sort: Sort::Name,
             descending: false,
         }

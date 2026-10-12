@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased multi-system follow-up
+
+- Broad loose cartridge verification, using common extensions plus those declared
+  by active DATs; custom and extensionless files no longer need system-specific code.
+- DAT header system labels by default, unrestricted custom overrides and broad GUI
+  suggestions; mixed-system collection search, saved system filter and system labels.
+- Known archives/disc containers/packages stay Unsupported even when declared by a
+  DAT. Raw representations must match exact reference bytes; no normalization.
+
 ## 0.0.1 — Unreleased
 
 - Rust workspace, pinned toolchain, native GUI prototype and Windows/Linux CI.

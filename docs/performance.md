@@ -83,3 +83,42 @@ measured by the core harness and remain open.
 A first after-run failed compiling bundled SQLite because its temporary assembly
 file was truncated in this environment. Reusing the same successfully built locked
 SQLite dependency from the before target allowed the full after harness to run.
+
+## T016 multi-system comparison — 2026-10-12
+
+Unchanged synthetic harness and fixture, reviewed 7992abe versus multi-system source.
+Same restricted Ubuntu/x86_64/Rust 1.99.0 environment and flags as above. Optimized
+before/after runs use thin LTO, BFD, two build workers and shared locked dependency
+artifacts. The before run overlapped final local workspace tests; the after run had
+no concurrent compiler. These single runs have different background load and do not
+isolate the cost of an individual change or establish GUI acceptance.
+
+| Source | Entries | DAT parse (ms) | Index build (ms) | Match p95 (µs) | Query/sort p95 (ms) | SQLite save/load (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Reviewed 7992abe | 10,000 | 11.72 | 2.73 | 0.43 | 2.34 | 41.83 / 37.56 |
+| Multi-system | 10,000 | 11.06 | 3.12 | 0.49 | 2.20 | 43.56 / 33.24 |
+| Reviewed 7992abe | 100,000 | 106.09 | 27.36 | 0.47 | 17.58 | 467.49 / 345.19 |
+| Multi-system | 100,000 | 105.32 | 31.41 | 0.55 | 21.79 | 469.27 / 341.49 |
+
+In this run the 100k index increased 4.05 ms (15%), match p95 0.08 µs (17%) and
+query/sort p95 4.21 ms (24%); the 10k query decreased 0.14 ms. New index work derives
+DAT extensions once, and matches exclude container entries. Search also checks system
+labels when path/title do not match. These added checks preserve verification semantics;
+controlled repeats on the Windows reference machine are still needed. Four-hash
+in-memory throughput was 266.03 / 298.67 MiB/s, not a disk-scan measurement.
+
+The first attempt to switch the shared release target between worktrees reused the
+old binary. That sample was discarded; `cargo clean --release -p skyline-core`
+forced recompilation of the changed core/example before the reported after sample.
+No dependency or build-flag changes were made to produce the comparison.
+
+An earlier debug-only comparison (unoptimized, no debug symbols, one codegen unit)
+observed before/after index 13.58/16.76 ms at 10k and 129.74/160.00 ms at 100k;
+query p95 33.11/27.90 ms and 209.34/207.59 ms. Avoiding repeated allocations of
+already-known lowercase DAT extensions reduced the first multi-system debug index
+observation from 173.21 to 160.00 ms at 100k. Debug numbers are not comparable to the
+release baseline and do not satisfy a release or GUI latency budget.
+
+The harness still measures filename queries and sort with no active system filter.
+Matched-system filtering/search at representative catalog mixes, native GUI rendering,
+startup/idle CPU/memory, disk scanning and interactive Windows behavior remain unmeasured.

@@ -1,9 +1,16 @@
-use crate::model::*;
-use std::collections::{BTreeSet, HashMap};
+use crate::{
+    formats::{LooseFilePolicy, unsupported_representation},
+    model::*,
+};
+use std::{
+    collections::{BTreeSet, HashMap},
+    path::Path,
+};
 
 pub struct CatalogIndex {
     catalogs: Vec<Catalog>,
     by_digest: HashMap<(&'static str, String), Vec<(usize, usize)>>,
+    loose_files: LooseFilePolicy,
 }
 
 impl CatalogIndex {
@@ -24,10 +31,16 @@ impl CatalogIndex {
                 }
             }
         }
+        let loose_files = LooseFilePolicy::from_catalogs(&catalogs);
         Self {
             catalogs,
             by_digest,
+            loose_files,
         }
+    }
+
+    pub fn accepts_loose_file(&self, path: &Path) -> bool {
+        self.loose_files.accepts(path)
     }
 
     pub fn identify(&self, size: u64, digests: &Digests) -> MatchResult {
@@ -93,13 +106,14 @@ impl CatalogIndex {
                 Verification::Ambiguous,
                 "The byte evidence supports multiple catalog identities. All candidates are retained.",
             )
-        } else if candidates
-            .iter()
-            .any(|c| c.entry.group_members > 1 || !c.entry.unsupported_algorithms.is_empty())
-        {
+        } else if candidates.iter().any(|c| {
+            c.entry.group_members > 1
+                || !c.entry.unsupported_algorithms.is_empty()
+                || unsupported_representation(Path::new(&c.entry.filename)).is_some()
+        }) {
             (
                 Verification::Unsupported,
-                "Candidate belongs to a multi-file set or requires an unsupported digest. Read-only inspection only.",
+                "Candidate belongs to a multi-file set, requires a format adapter or an unsupported comparison. Read-only inspection only.",
             )
         } else if candidates.iter().any(|c| c.entry.digests.strong()) {
             (

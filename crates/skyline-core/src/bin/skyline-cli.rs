@@ -15,7 +15,8 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("--version") => println!("Skyline {VERSION}"),
         Some("import") if args.len() == 4 => {
-            let imported = import_path(Path::new(&args[3]), &args[2], &cancel)?;
+            let system = if args[2] == "auto" { "" } else { &args[2] };
+            let imported = import_path(Path::new(&args[3]), system, &cancel)?;
             let count = imported.catalog.entries.len();
             Store::open(Path::new(&args[1]))?.import_catalog(&imported)?;
             println!("Imported {count} entries into {}", args[1]);
@@ -35,7 +36,7 @@ fn main() -> Result<()> {
         }
         _ => {
             eprintln!(
-                "Skyline {VERSION}\nUsage:\n  skyline-cli --version\n  skyline-cli import <database> <system> <DAT>\n  skyline-cli scan <database> <folder> [excluded-relative-prefix ...]\nAll scans force rehash and are read-only. The database stores the last completed scan."
+                "Skyline {VERSION}\nUsage:\n  skyline-cli --version\n  skyline-cli import <database> <system|auto> <DAT>\n  skyline-cli scan <database> <folder> [excluded-relative-prefix ...]\nUse auto to take the system label from the DAT header. Scans use all imported catalogs.\nAll scans force rehash and are read-only. The database stores the last completed scan."
             );
             if !args.is_empty() {
                 bail!("Invalid command or arguments");

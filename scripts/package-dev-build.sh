@@ -39,7 +39,7 @@ Platform: $platform
 Built: $(date -u +"%Y-%m-%d %H:%M UTC")
 Toolchain: $(rustc --version)
 
-Read-only prototype for loose Game Boy/Game Boy Color ROMs and local Logiqx XML DATs.
+Read-only prototype for multiple systems, loose cartridge files and local Logiqx XML DATs.
 It never modifies ROM files. ZIP inspection and file organization are not implemented.
 The application code license is pending; a full third-party notice bundle is still
 required before any public release. Builds are unsigned.

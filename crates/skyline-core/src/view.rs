@@ -38,6 +38,19 @@ pub fn query_rows(
     sort: Sort,
     descending: bool,
 ) -> Vec<usize> {
+    query_rows_in_system(records, query, status, None, sort, descending)
+}
+
+/// Filtering an ambiguous row never resolves its identity or discards candidates.
+/// Only catalog-supported candidate systems participate; extensions are not evidence.
+pub fn query_rows_in_system(
+    records: &[FileRecord],
+    query: &str,
+    status: Option<&Verification>,
+    system: Option<&str>,
+    sort: Sort,
+    descending: bool,
+) -> Vec<usize> {
     let query = query.to_lowercase();
     let mut visible: Vec<_> = records
         .iter()
@@ -46,12 +59,18 @@ pub fn query_rows(
             if status.is_some_and(|status| row.result.status != *status) {
                 return false;
             }
+            if system
+                .is_some_and(|system| !row.result.candidates.iter().any(|c| c.system == system))
+            {
+                return false;
+            }
             query.is_empty()
                 || row.path.to_string_lossy().to_lowercase().contains(&query)
                 || row.result.status.label().to_lowercase().contains(&query)
                 || row.result.candidates.iter().any(|candidate| {
                     candidate.entry.game.to_lowercase().contains(&query)
                         || candidate.entry.filename.to_lowercase().contains(&query)
+                        || candidate.system.to_lowercase().contains(&query)
                 })
         })
         .map(|(id, _)| id)

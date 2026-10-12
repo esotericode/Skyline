@@ -198,6 +198,7 @@ fn settings_round_trip_and_future_optional_fields_preserve_choices() {
         preferred_catalog: Some(CatalogChoice::from_catalog(&imported().catalog)),
         search: "Synthetic".into(),
         status_filter: Some(Verification::Unknown),
+        collection_system: Some("Game Boy Color".into()),
         sort: Sort::Status,
         descending: true,
     };
@@ -214,7 +215,8 @@ fn settings_round_trip_and_future_optional_fields_preserve_choices() {
     drop(connection);
     let restored = Store::open(&path).unwrap().settings().unwrap();
     assert_eq!(restored.root_path, "roms");
-    assert_eq!(restored.system, "Game Boy");
+    assert_eq!(restored.system, "");
+    assert_eq!(restored.collection_system, None);
     assert_eq!(restored.sort, Sort::Name);
 }
 

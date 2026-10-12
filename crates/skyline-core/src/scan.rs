@@ -1,4 +1,5 @@
 use crate::{
+    formats::unsupported_representation,
     hash::{Cancellation, hash_file, is_link},
     matching::CatalogIndex,
     model::*,
@@ -133,13 +134,15 @@ pub fn scan_folder(
             }
             continue;
         }
-        let extension = path
-            .extension()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_ascii_lowercase();
-        if !metadata.is_file() || !matches!(extension.as_str(), "gb" | "gbc" | "rom" | "bin") {
-            records.push(issue(path, Verification::Unsupported, "This prototype hashes only loose .gb, .gbc, .rom and .bin files. Archives and other representations await format adapters.".into()));
+        if !metadata.is_file() || !index.accepts_loose_file(&path) {
+            let explanation = if !metadata.is_file() {
+                "Only regular loose files can be hashed."
+            } else {
+                unsupported_representation(&path).unwrap_or(
+                    "This extension is not a common loose ROM representation or declared by an active DAT. Import its catalog to enable loose-file checks.",
+                )
+            };
+            records.push(issue(path, Verification::Unsupported, explanation.into()));
             continue;
         }
         let completed_files = records.len();

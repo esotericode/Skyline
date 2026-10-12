@@ -1,8 +1,11 @@
 # Skyline
 
 A Rust desktop ROM manager for offline identification, explainable verification and
-file preservation. **0.0.1 is an unreleased read-only development prototype** for
-loose Game Boy/Game Boy Color ROMs and local Logiqx XML DATs. Read [AGENTS.md](AGENTS.md)
+file preservation across many systems. **0.0.1 is a read-only development prototype**
+for loose cartridge files and local Logiqx XML DATs. NES, SNES, Nintendo 64, GBA,
+DS, Sega, Atari, PC Engine, Neo Geo Pocket, WonderSwan and other loose representations
+share the same byte-verification pipeline. See [format coverage](docs/formats.md)
+for the supported workflow and remaining adapters. Read [AGENTS.md](AGENTS.md)
 for project requirements and progress.
 
 ## Build
@@ -34,25 +37,33 @@ Windows SmartScreen may warn before the first launch. Windows: extract and run
 
 ## Try it
 
-1. Select Game Boy or Game Boy Color in the sidebar, browse to a local UTF-8 XML DAT
-   path and click **Import catalog**. DATs are user-supplied; none are bundled.
-2. Select all catalogs or one snapshot for the next scan.
+1. Browse to a local UTF-8 XML DAT and click **Import catalog**. Leave the optional
+   system override blank to use the DAT header name, or enter/select any system label.
+   DATs are user-supplied; none are bundled. Repeat for the systems in your collection.
+2. Select **All imported catalogs** to identify a mixed collection, or one snapshot
+   to restrict reference evidence for the next scan.
 3. Choose a ROM folder and optional relative exclusion prefixes (one per line), then
-   click **Scan and verify**. Supported loose extensions: .gb, .gbc, .rom, .bin.
+   click **Scan and verify**. Common loose cartridge extensions and additional
+   extensions declared by active DATs are checked. File extensions do not establish
+   the system or identity; expected sizes and hashes do.
 4. Browse/search/filter while the worker runs. **Cancel job** or Escape cancels.
+   Search system names or use **Matched system** to browse a mixed collection.
    Select a row for calculated/expected hashes, reference flags and source evidence.
 5. Check the version in the header or **About** window.
 
 All scans reread bytes and preserve originals. Unknown does not mean corrupt;
-CRC-only has reduced confidence; matching a bad dump preserves its flag. ZIP/other
-formats are visibly Unsupported. File organization and mutations are deferred.
+CRC-only has reduced confidence; matching a bad dump preserves its flag. Shared bytes
+across system identities remain Ambiguous. ZIP, dedicated containers and unsupported
+sets are visibly Unsupported. Byte-order/header changes are never applied silently;
+the file must match the catalog's exact byte representation. File organization and
+mutations are deferred.
 
 Catalogs, exact snapshots and the last completed scan persist in
 `%LOCALAPPDATA%\Skyline` on Windows; Linux development uses `$XDG_DATA_HOME/Skyline`
 or `~/.local/share/Skyline`. Override with `SKYLINE_DATA_DIR`. Cancelled/failed scans
 retain saved data; partial cancelled rows are temporary. Evidence is historical:
 rescan after file/reference changes. Paths, exclusions, source selection, search,
-filter and sorting preferences are saved locally after editing and restored at
+system/status filters and sorting preferences are saved locally after editing and restored at
 startup. Picking a path selects it; import and scan still require their buttons.
 Manual path entry remains available if a native picker is unavailable.
 
@@ -66,11 +77,14 @@ Keep the database outside the ROM folder when possible:
 
 ```sh
 cargo run --locked -p skyline-core --bin skyline-cli -- --version
-cargo run --locked -p skyline-core --bin skyline-cli -- import ./skyline.sqlite3 "Game Boy" ./reference.dat
+cargo run --locked -p skyline-core --bin skyline-cli -- import ./skyline.sqlite3 auto ./nes.dat
+cargo run --locked -p skyline-core --bin skyline-cli -- import ./skyline.sqlite3 auto ./megadrive.dat
 cargo run --locked -p skyline-core --bin skyline-cli -- scan ./skyline.sqlite3 ./roms Backups
 ```
 
 CLI output is JSON evidence. Tests use disposable synthetic bytes and no network.
+`auto` uses the DAT header as the system label; an explicit custom label also works.
+The scan compares against all imported systems in the database.
 
 See [architecture](docs/architecture.md), [versioning](docs/versioning.md),
 [dependency notices](docs/dependencies.md), [performance](docs/performance.md), and

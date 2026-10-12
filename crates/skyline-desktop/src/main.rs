@@ -7,16 +7,17 @@ use eframe::egui::{self, Color32, RichText};
 use skyline_core::{
     VERSION,
     catalog::import_path,
+    formats::SYSTEM_PRESETS,
     hash::Cancellation,
     matching::CatalogIndex,
     model::{Catalog, FileRecord, Verification},
     scan::{ScanOptions, ScanProgress, scan_folder},
     settings::{AppSettings, CatalogChoice},
     store::Store,
-    view::{Sort, display_path, format_size, format_utc, query_rows},
+    view::{Sort, display_path, format_size, format_utc, query_rows_in_system},
 };
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::PathBuf,
     sync::{
         Arc,
@@ -183,6 +184,8 @@ struct Skyline {
     duplicates: HashMap<String, usize>,
     search: String,
     status_filter: Option<Verification>,
+    collection_system: Option<String>,
+    matched_systems: Vec<String>,
     sort: Sort,
     descending: bool,
     selected_row: Option<usize>,
@@ -226,6 +229,8 @@ impl Skyline {
             duplicates: HashMap::new(),
             search: String::new(),
             status_filter: None,
+            collection_system: None,
+            matched_systems: vec![],
             sort: Sort::Name,
             descending: false,
             selected_row: None,
@@ -233,7 +238,7 @@ impl Skyline {
             dat_path: String::new(),
             root_path: String::new(),
             exclusions: String::new(),
-            system: "Game Boy".into(),
+            system: String::new(),
             status: "Loading local collection…".into(),
             error: None,
             progress: None,
@@ -397,6 +402,7 @@ impl Skyline {
                 .map(CatalogChoice::from_catalog),
             search: self.search.clone(),
             status_filter: self.status_filter.clone(),
+            collection_system: self.collection_system.clone(),
             sort: self.sort,
             descending: self.descending,
         }
@@ -413,6 +419,7 @@ impl Skyline {
             .and_then(|choice| choice.resolve(&self.catalogs));
         self.search = settings.search.clone();
         self.status_filter = settings.status_filter.clone();
+        self.collection_system = settings.collection_system.clone();
         self.sort = settings.sort;
         self.descending = settings.descending;
     }
@@ -472,6 +479,18 @@ impl Skyline {
     }
 
     fn set_records(&mut self, records: Vec<FileRecord>) {
+        self.matched_systems = records
+            .iter()
+            .flat_map(|record| {
+                record
+                    .result
+                    .candidates
+                    .iter()
+                    .map(|candidate| candidate.system.clone())
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         self.records = records;
         self.selected_row = None;
         self.duplicates.clear();
@@ -485,10 +504,11 @@ impl Skyline {
 
     fn filter_rows(&mut self) {
         self.scroll_request = Some(0.0);
-        self.visible = query_rows(
+        self.visible = query_rows_in_system(
             &self.records,
             &self.search,
             self.status_filter.as_ref(),
+            self.collection_system.as_deref(),
             self.sort,
             self.descending,
         );
@@ -558,8 +578,11 @@ impl Skyline {
                 if self.catalogs.is_empty() { ui.label("Import a DAT to identify your files. Scans without references show Unknown."); }
                 ui.separator();
                 ui.heading("Import DAT");
-                egui::ComboBox::from_id_salt("system").selected_text(&self.system).show_ui(ui, |ui| {
-                    for system in ["Game Boy", "Game Boy Color"] { ui.selectable_value(&mut self.system, system.into(), system); }
+                ui.label("System override (optional)");
+                ui.add(egui::TextEdit::singleline(&mut self.system).hint_text("Use the DAT header name").desired_width(f32::INFINITY));
+                egui::ComboBox::from_id_salt("system").selected_text("Choose a system…").show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.system, String::new(), "From DAT header");
+                    for system in SYSTEM_PRESETS { ui.selectable_value(&mut self.system, (*system).into(), *system); }
                 });
                 ui.label("Local XML DAT file path");
                 ui.add(egui::TextEdit::singleline(&mut self.dat_path).hint_text("C:\\Catalogs\\reference.dat").desired_width(f32::INFINITY));
@@ -586,6 +609,7 @@ impl Skyline {
                     }, ctx);
                 }
                 ui.small("Every scan rereads file bytes. Original files are preserved.");
+                ui.small("Loose ROMs from many systems are checked against active DATs. System identity comes from matching bytes.");
                 ui.add_space(12.0);
                 ui.small("ZIP inspection and organization are upcoming milestones.");
             });
@@ -789,7 +813,7 @@ impl Skyline {
                     changed |= ui
                         .add(
                             egui::TextEdit::singleline(&mut self.search)
-                                .hint_text("Search files or catalog titles")
+                                .hint_text("Search files, systems or catalog titles")
                                 .desired_width(ui.available_width()),
                         )
                         .changed();
@@ -797,6 +821,20 @@ impl Skyline {
                 if changed {
                     self.filter_rows();
                 }
+            });
+            ui.horizontal(|ui| {
+                if !self.settings_loaded && self.receiver.is_some() { ui.disable(); }
+                ui.label("Matched system");
+                let mut changed = false;
+                egui::ComboBox::from_id_salt("collection_system")
+                    .selected_text(self.collection_system.as_deref().unwrap_or("All systems"))
+                    .show_ui(ui, |ui| {
+                        changed |= ui.selectable_value(&mut self.collection_system, None, "All systems").changed();
+                        for system in &self.matched_systems {
+                            changed |= ui.selectable_value(&mut self.collection_system, Some(system.clone()), system).changed();
+                        }
+                    });
+                if changed { self.filter_rows(); }
             });
             ui.add_space(6.0);
             if self.records.is_empty() {
@@ -852,7 +890,7 @@ impl Skyline {
         for (index, (title, sort)) in [
             ("Status", Some(Sort::Status)),
             ("File", Some(Sort::Name)),
-            ("Catalog match", None),
+            ("System / catalog match", None),
             ("Size", Some(Sort::Size)),
         ]
         .into_iter()
@@ -963,12 +1001,26 @@ impl Skyline {
                 record.result.candidates.len()
             ))
             .color(status_color(status)),
-            [first, ..] => RichText::new(&first.entry.game),
+            [first, ..] => RichText::new(format!("{} · {}", first.system, first.entry.game)),
         };
         paint_cell(ui, columns.cell(rect, 2), matched, false);
         let size = record.size.map_or("—".into(), format_size);
         paint_cell(ui, columns.cell(rect, 3), RichText::new(size).weak(), true);
-        let label = format!("{} · {}", record.display_name(), status.label());
+        let systems = record
+            .result
+            .candidates
+            .iter()
+            .map(|candidate| candidate.system.as_str())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let label = format!(
+            "{} · {} · {}",
+            record.display_name(),
+            status.label(),
+            systems
+        );
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &label)
         });

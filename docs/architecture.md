@@ -27,7 +27,9 @@ until the platform and performance evidence in AGENTS.md is recorded.
 
 ## Workflow and boundaries
 
-Users choose the system explicitly, never from filename inference. Import preserves
+Imports use the DAT header name as the system label by default, with any explicit
+custom override accepted. System identity requires matching catalog byte evidence,
+never filename/extension inference. Import preserves
 exact XML bytes in an immutable SHA-256 snapshot with local origin, timestamp, DAT
 name/version, format, and unknown license status. External DOCTYPE identifiers are
 inert; internal DTD subsets/entities are rejected. UTF-8 Logiqx only, capped at
@@ -42,8 +44,12 @@ mismatch requires a future user-selected expectation. Multi-file entries and
 unsupported digest requirements remain read-only/Unsupported. Catalog names retain
 raw region/revision/language text; structured metadata extraction is pending.
 
-Recursive scans stream .gb/.gbc/.rom/.bin through CRC32/MD5/SHA-1/SHA-256 in one pass.
-No header transformation or source writes occur. ZIP/other formats stay Unsupported.
+Recursive scans stream common loose cartridge representations and extensions declared
+by active DAT entries through CRC32/MD5/SHA-1/SHA-256 in one pass. A policy derived
+once per index enables custom/extensionless files without a system-specific code
+change. Known archives/disc containers/packages cannot opt into loose checks through
+a DAT. Matching also refuses to verify a container entry by whole-file hashes.
+No header/byte-order transformation or source writes occur. See docs/formats.md.
 Relative-prefix exclusions and cancellation are supported. Symlinks and junctions
 are skipped (other Windows reparse points such as OneDrive placeholders are hashed); recursion is capped at 128, records at 100,000. Size/mtime changes and
 Unix file identity are checked. The prototype assumes a stable directory tree;
@@ -65,8 +71,13 @@ Failures/cancellation roll back the entire migration. No original DAT file, netw
 request or database deletion is needed. Increment PARSER_REVISION for future semantic
 parser changes; newer schemas/parser caches reject older readers.
 
-Preferences include paths, exclusions, import system, chosen source, query/filter and
-sort. Sources use SHA-256 plus system instead of unstable array indices. Changes save
+Preferences include paths, exclusions, import system override, chosen source,
+query, matched-system/status filters and
+sort. The added optional system filter defaults to All systems in older settings;
+existing explicit import labels are retained. Parser revision stays 1: automatic
+labels apply only to new imports with an empty override, and no derived entries or
+existing provenance need reparsing/relabeling. Sources use SHA-256 plus system instead
+of unstable array indices. Changes save
 after a 500 ms idle debounce via the job worker. Jobs delay that save until idle; quit
 flushes the latest edit on a worker after an outstanding save finishes. Broken settings
 fall back visibly to defaults without replacing the stored payload on startup. Settings
