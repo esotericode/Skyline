@@ -31,6 +31,9 @@ pub struct IntakeReport {
 impl IntakeReport {
     pub(crate) fn issue(&mut self, path: PathBuf, explanation: String) {
         if self.issues.len() < 256 {
+            // Reports are JSON; an unrepresentable filename must not turn one
+            // skipped input into a batch serialization failure.
+            let path = PathBuf::from(path.to_string_lossy().into_owned());
             self.issues.push(IntakeIssue { path, explanation });
         } else {
             self.omitted_issues += 1;
@@ -40,7 +43,12 @@ impl IntakeReport {
 
 /// Absolute keys remain available when a previously selected folder is offline.
 pub(crate) fn folder_key(path: &Path) -> Result<PathBuf> {
-    Ok(std::fs::canonicalize(path).unwrap_or(std::path::absolute(path)?))
+    let resolved = std::fs::canonicalize(path).unwrap_or(std::path::absolute(path)?);
+    // Windows canonical paths acquire a verbatim prefix; absolute offline paths
+    // do not. Use the same key both online and offline, including UNC shares.
+    #[cfg(windows)]
+    let resolved = PathBuf::from(crate::view::display_path(&resolved).into_owned());
+    Ok(resolved)
 }
 
 pub(crate) struct Discovery {

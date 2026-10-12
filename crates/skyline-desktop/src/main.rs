@@ -48,6 +48,7 @@ struct LoadedState {
 }
 
 struct ReferenceState {
+    requested_folder: String,
     catalogs: Arc<Vec<Catalog>>,
     intake: Option<IntakeReport>,
     warning: Option<String>,
@@ -120,6 +121,7 @@ fn run_job(
                 let mut store = Store::open_cancellable(&database, &cancel)?;
                 let intake = sync_references(&mut store, &path, &cancel, &sender, &ctx)?;
                 Ok(Event::References(Box::new(ReferenceState {
+                    requested_folder: path.to_string_lossy().into_owned(),
                     catalogs: Arc::new(store.active_catalogs(Some(&path))?),
                     intake: Some(intake),
                     warning: None,
@@ -152,6 +154,7 @@ fn run_job(
                         };
                     let active = Arc::new(store.active_catalogs(Some(&path))?);
                     sender.send(Event::References(Box::new(ReferenceState {
+                        requested_folder: path.to_string_lossy().into_owned(),
                         catalogs: active.clone(),
                         intake,
                         warning,
@@ -405,6 +408,11 @@ impl Skyline {
                 Event::References(state) => {
                     self.catalogs = state.catalogs;
                     self.intake = state.intake;
+                    if self.dat_folder.trim() == state.requested_folder
+                        && let Some(report) = &self.intake
+                    {
+                        self.dat_folder = report.folder.to_string_lossy().into_owned();
+                    }
                     self.error = state.warning;
                     self.refresh_system_catalog_counts();
                     self.status = format!(

@@ -368,6 +368,24 @@ fn dat_discovery_skips_file_and_directory_links_and_rejects_link_roots() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn unrepresentable_filename_is_a_quiet_issue_not_a_failed_batch() {
+    use std::os::unix::ffi::OsStringExt;
+    let temp = tempfile::tempdir().unwrap();
+    let dats = temp.path().join("dats");
+    std::fs::create_dir(&dats).unwrap();
+    std::fs::write(dats.join("good.dat"), dat("GBA", "Game.gba", b"a")).unwrap();
+    let bad_name = std::ffi::OsString::from_vec(b"bad-\xff.dat".to_vec());
+    std::fs::write(dats.join(bad_name), dat("Other", "Game.rom", b"b")).unwrap();
+    let mut store = Store::open(&temp.path().join("state.db")).unwrap();
+    let report = store
+        .sync_catalog_folder(&dats, &Cancellation::default(), |_, _, _| {})
+        .unwrap();
+    assert_eq!((report.catalogs, report.issues.len()), (1, 1));
+    assert!(store.catalog_folder_report(&dats).unwrap().is_some());
+}
+
 #[test]
 fn storage_failure_rolls_back_entire_batch_instead_of_treating_it_as_bad_xml() {
     let temp = tempfile::tempdir().unwrap();
