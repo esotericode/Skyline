@@ -263,11 +263,12 @@ fn recursive_scan_preserves_sources_excludes_prefixes_and_records_unsupported() 
             .count(),
         1
     );
+    // archive.zip is opened as a ZIP; its text content is not a readable archive.
     assert_eq!(
         report
             .records
             .iter()
-            .filter(|r| r.result.status == Verification::Unsupported)
+            .filter(|r| r.result.status == Verification::ReadError)
             .count(),
         1
     );
@@ -370,6 +371,7 @@ fn database_roundtrip_retains_immutable_snapshot_and_completed_collection() {
     );
     let record = FileRecord {
         path: PathBuf::from("synthetic.gb"),
+        member: None,
         size: Some(3),
         digests: Some(hashes()),
         header: None,
@@ -443,6 +445,7 @@ fn view_search_filter_and_sort_use_original_and_reference_names() {
     use skyline_core::view::{Sort, query_rows};
     let row = |path: &str, size: u64, result: MatchResult| FileRecord {
         path: path.into(),
+        member: None,
         size: Some(size),
         digests: Some(hashes()),
         header: None,
@@ -553,6 +556,7 @@ fn view_sorts_names_case_insensitively_and_status_by_strength() {
     use skyline_core::view::{Sort, query_rows};
     let row = |path: &str, result: MatchResult| FileRecord {
         path: path.into(),
+        member: None,
         size: Some(3),
         digests: Some(hashes()),
         header: None,

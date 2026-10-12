@@ -19,6 +19,7 @@ crc32fast = "=1.5.0"
 quick-xml = "=0.38.3"
 rusqlite = { version = "=0.37.0", features = ["bundled"] }
 tempfile = "=3.23.0"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs", "deflate64"] }
 
 [profile.release]
 lto = "thin"

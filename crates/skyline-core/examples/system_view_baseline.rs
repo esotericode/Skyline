@@ -39,6 +39,7 @@ fn main() -> anyhow::Result<()> {
                 };
                 FileRecord {
                     path: format!("Fixture {id:06}.custom{}", id % 4).into(),
+                    member: None,
                     size: Some(3),
                     digests: Some(digests.clone()),
                     header: None,

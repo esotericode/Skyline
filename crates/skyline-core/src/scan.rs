@@ -1,6 +1,7 @@
 use crate::{
-    formats::unsupported_representation,
-    hash::{Cancellation, hash_file, is_link},
+    archive::scan_zip,
+    formats::{extension, unsupported_representation},
+    hash::{Cancellation, Hashed, hash_file, is_link},
     matching::CatalogIndex,
     model::*,
 };
@@ -31,9 +32,10 @@ pub struct ScanReport {
     pub hashed_bytes: u64,
 }
 
-fn issue(path: PathBuf, status: Verification, explanation: String) -> FileRecord {
+pub(crate) fn issue(path: PathBuf, status: Verification, explanation: String) -> FileRecord {
     FileRecord {
         path,
+        member: None,
         size: None,
         digests: None,
         header: None,
@@ -46,6 +48,40 @@ fn issue(path: PathBuf, status: Verification, explanation: String) -> FileRecord
             explanation,
         },
     }
+}
+
+/// Matches hashed bytes and classifies the result. `name` is the file's (or ZIP
+/// member's) name, used to judge whether an unmatched file looks like a ROM.
+pub(crate) fn hashed_record(
+    path: PathBuf,
+    member: Option<String>,
+    name: &Path,
+    hashed: Hashed,
+    index: &CatalogIndex,
+) -> Result<FileRecord> {
+    let (mut result, header_check) =
+        index.assess(hashed.size, &hashed.digests, hashed.header.as_ref())?;
+    // Unknown is for files that look like ROMs. A readme or artwork that was read
+    // only because its size matched some entry is just another file.
+    if result.candidates.is_empty()
+        && result.rejected.is_empty()
+        && (!index.is_rom_like(name) || hashed.textual)
+    {
+        result.status = Verification::Other;
+        result.explanation =
+            "No catalog entry matches, and this does not look like a ROM file by type or content."
+                .into();
+    }
+    Ok(FileRecord {
+        path,
+        member,
+        size: Some(hashed.size),
+        digests: Some(hashed.digests),
+        header: hashed.header,
+        format: hashed.format,
+        header_check,
+        result,
+    })
 }
 
 pub fn scan_folder(
@@ -145,6 +181,37 @@ pub fn scan_folder(
             ));
             continue;
         }
+        if extension(&path) == "zip" {
+            let completed_files = records.len();
+            progress(ScanProgress {
+                path: path.clone(),
+                completed_files,
+                hashed_bytes,
+            });
+            let base = hashed_bytes;
+            match scan_zip(&path, index, cancel, |bytes| {
+                progress(ScanProgress {
+                    path: path.clone(),
+                    completed_files,
+                    hashed_bytes: base + bytes,
+                })
+            }) {
+                Ok((members, bytes)) => {
+                    hashed_bytes += bytes;
+                    records.extend(members);
+                    if records.len() > MAX_SCAN_RECORDS {
+                        bail!(
+                            "Scan exceeds the 100,000-record prototype limit; select a smaller folder"
+                        );
+                    }
+                }
+                Err(_) if cancel.is_cancelled() => break,
+                Err(error) => {
+                    records.push(issue(path, Verification::ReadError, format!("{error:#}")))
+                }
+            }
+            continue;
+        }
         if let Some(explanation) = unsupported_representation(&path) {
             records.push(issue(path, Verification::Unsupported, explanation.into()));
             continue;
@@ -174,32 +241,14 @@ pub fn scan_folder(
         match hashed {
             Ok(hashed) => {
                 hashed_bytes += hashed.size;
-                let (mut result, header_check) =
-                    index.assess(hashed.size, &hashed.digests, hashed.header.as_ref())?;
-                // Unknown is for files that look like ROMs. A readme or artwork that was
-                // read only because its size matched some entry is just another file.
-                if result.candidates.is_empty()
-                    && result.rejected.is_empty()
-                    && (!index.is_rom_like(&path) || hashed.textual)
-                {
-                    result.status = Verification::Other;
-                    result.explanation = "No catalog entry matches, and this does not look like a ROM file by type or content.".into();
-                }
-                records.push(FileRecord {
-                    path,
-                    size: Some(hashed.size),
-                    digests: Some(hashed.digests),
-                    header: hashed.header,
-                    format: hashed.format,
-                    header_check,
-                    result,
-                });
+                let name = path.clone();
+                records.push(hashed_record(path, None, &name, hashed, index)?);
             }
             Err(_) if cancel.is_cancelled() => break,
             Err(error) => records.push(issue(path, Verification::ReadError, format!("{error:#}"))),
         }
     }
-    records.sort_by(|a, b| a.path.cmp(&b.path));
+    records.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.member.cmp(&b.member)));
     Ok(ScanReport {
         records,
         cancelled: cancel.is_cancelled(),

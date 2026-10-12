@@ -55,6 +55,7 @@ fn v1_database(path: &Path, imported: &ImportedCatalog) -> FileRecord {
     assert_eq!(result.status, Verification::Unsupported);
     let record = FileRecord {
         path: "synthetic.gb".into(),
+        member: None,
         size: Some(size),
         digests: Some(digests),
         header: None,

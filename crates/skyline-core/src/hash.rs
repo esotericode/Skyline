@@ -167,66 +167,115 @@ pub fn is_link(metadata: &std::fs::Metadata) -> bool {
     metadata.file_type().is_symlink()
 }
 
+/// A regular source file opened read-only without following a final link, with the
+/// metadata needed to confirm it did not change while it was read.
+pub struct OpenedSource {
+    pub file: std::fs::File,
+    before: std::fs::Metadata,
+    opened: std::fs::Metadata,
+}
+
+impl OpenedSource {
+    pub fn open(path: &Path) -> Result<Self> {
+        let before = std::fs::symlink_metadata(path).context("Inspecting source")?;
+        if is_link(&before) || !before.is_file() {
+            bail!("Only regular files are supported; links/reparse points are skipped");
+        }
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // FILE_FLAG_OPEN_REPARSE_POINT: inspect the link itself, not its target.
+            options.custom_flags(0x0020_0000);
+        }
+        let file = options
+            .open(path)
+            .context("Opening source read-only without following a final link")?;
+        let opened = file.metadata()?;
+        if is_link(&opened) {
+            bail!("Links/reparse points are skipped");
+        }
+        Ok(Self {
+            file,
+            before,
+            opened,
+        })
+    }
+
+    pub fn len(&self) -> u64 {
+        self.opened.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.opened.len() == 0
+    }
+
+    /// Fails if the file or its path changed between opening and now.
+    pub fn ensure_unchanged(&self, path: &Path) -> Result<()> {
+        let after = self.file.metadata()?;
+        let path_after = std::fs::symlink_metadata(path).context("Rechecking source path")?;
+        if is_link(&path_after)
+            || path_after.len() != after.len()
+            || path_after.modified()? != after.modified()?
+        {
+            bail!("Source path changed while hashing; rescan when stable");
+        }
+        if self.opened.len() != after.len() || self.opened.modified()? != after.modified()? {
+            bail!("Source changed while hashing; rescan when the file is stable");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if self.before.dev() != self.opened.dev()
+                || self.before.ino() != self.opened.ino()
+                || path_after.dev() != self.opened.dev()
+                || path_after.ino() != self.opened.ino()
+            {
+                bail!("Source changed before hashing");
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = &self.before;
+        Ok(())
+    }
+}
+
+/// Hashes ROM bytes from any reader (a file or an archive member), recognizing headers
+/// and format notes from the first bytes. `extension` is lowercase; `size` is the
+/// expected total, used by size-based header rules.
+pub fn hash_rom(
+    reader: impl Read,
+    extension: &str,
+    size: u64,
+    cancel: &Cancellation,
+    progress: impl FnMut(u64),
+) -> Result<Hashed> {
+    let mut format = None;
+    let mut result = hash_stream_with_header(reader, cancel, progress, |prefix| {
+        format = inspect_format(prefix, extension, size);
+        detect_header(prefix, extension, size)
+    })?;
+    result.format = format;
+    Ok(result)
+}
+
 pub fn hash_file(path: &Path, cancel: &Cancellation, progress: impl FnMut(u64)) -> Result<Hashed> {
-    let before = std::fs::symlink_metadata(path).context("Inspecting source")?;
-    if is_link(&before) || !before.is_file() {
-        bail!("Only regular files are supported; links/reparse points are skipped");
-    }
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        // FILE_FLAG_OPEN_REPARSE_POINT: inspect the link itself, not its target.
-        options.custom_flags(0x0020_0000);
-    }
-    let file = options
-        .open(path)
-        .context("Opening source read-only without following a final link")?;
-    let opened = file.metadata()?;
-    if is_link(&opened) {
-        bail!("Links/reparse points are skipped");
-    }
+    let source = OpenedSource::open(path)?;
     let extension = path
         .extension()
         .unwrap_or_default()
         .to_string_lossy()
         .to_ascii_lowercase();
-    let mut format = None;
-    let mut result = hash_stream_with_header(&file, cancel, progress, |prefix| {
-        format = inspect_format(prefix, &extension, opened.len());
-        detect_header(prefix, &extension, opened.len())
-    })?;
-    result.format = format;
-    let after = file.metadata()?;
-    let path_after = std::fs::symlink_metadata(path).context("Rechecking source path")?;
-    if is_link(&path_after)
-        || path_after.len() != after.len()
-        || path_after.modified()? != after.modified()?
-    {
-        bail!("Source path changed while hashing; rescan when stable");
-    }
-    if opened.len() != result.size
-        || opened.len() != after.len()
-        || opened.modified()? != after.modified()?
-    {
+    let result = hash_rom(&source.file, &extension, source.len(), cancel, progress)?;
+    source.ensure_unchanged(path)?;
+    if source.len() != result.size {
         bail!("Source changed while hashing; rescan when the file is stable");
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if before.dev() != opened.dev()
-            || before.ino() != opened.ino()
-            || path_after.dev() != opened.dev()
-            || path_after.ino() != opened.ino()
-        {
-            bail!("Source changed before hashing");
-        }
     }
     Ok(result)
 }

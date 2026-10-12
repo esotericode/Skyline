@@ -747,7 +747,7 @@ impl Skyline {
                 ui.small("Every scan rereads file bytes. Original files are preserved.");
                 ui.small("Loose ROMs from many systems are checked against active DATs. System identity comes from matching bytes.");
                 ui.add_space(12.0);
-                ui.small("ZIP inspection and organization are upcoming milestones.");
+                ui.small("ROMs inside ZIP files are checked too. File organization is an upcoming milestone.");
             });
         });
     }
@@ -767,6 +767,9 @@ impl Skyline {
                     };
                     ui.label(RichText::new(record.display_name()).strong());
                     ui.label(RichText::new(display_path(&record.path)).weak());
+                    if let Some(member) = &record.member {
+                        ui.label(format!("Inside this ZIP: {member}"));
+                    }
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new(record.result.status.label())
@@ -1325,7 +1328,7 @@ impl eframe::App for Skyline {
         egui::Window::new("About Skyline").open(&mut self.show_about).resizable(false).show(ctx, |ui| {
             ui.heading(format!("Skyline {VERSION}"));
             ui.label("Development build · offline ROM verification");
-            ui.label("Loose-file read-only prototype. ZIP and file organization are not implemented yet.");
+            ui.label("Read-only prototype for loose and zipped ROMs. File organization is not implemented yet.");
             ui.label(format!("Local database: {}", self.database.display()));
             ui.label("Application license: pending owner selection.");
         });

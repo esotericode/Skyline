@@ -160,7 +160,11 @@ pub struct HeaderCheck {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileRecord {
+    /// The file on disk; for a ZIP member, the archive.
     pub path: PathBuf,
+    /// The member's name inside the ZIP at `path`, as stored in the archive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<String>,
     pub size: Option<u64>,
     pub digests: Option<Digests>,
     /// Absent in records saved before header detection existed.
@@ -181,11 +185,23 @@ pub struct FileFormat {
 }
 
 impl FileRecord {
+    /// The file name, or for a ZIP member `Archive.zip › member`. A one-ROM ZIP named
+    /// after its ROM (the usual layout) shows just the archive name.
     pub fn display_name(&self) -> String {
-        self.path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
+        let file = self.path.file_name().unwrap_or_default().to_string_lossy();
+        let Some(member) = &self.member else {
+            return file.into_owned();
+        };
+        let member_name = member.rsplit(['/', '\\']).next().unwrap_or(member);
+        let stem = |name: &str| {
+            name.rsplit_once('.')
+                .map_or(name, |(stem, _)| stem)
+                .to_owned()
+        };
+        if stem(&file) == stem(member_name) {
+            file.into_owned()
+        } else {
+            format!("{file} › {member}")
+        }
     }
 }

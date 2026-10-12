@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod catalog;
 pub mod catalog_folder;
 pub mod formats;

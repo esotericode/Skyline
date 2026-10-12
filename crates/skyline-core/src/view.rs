@@ -125,6 +125,10 @@ fn query_rows_filtered(
             }
             query.is_empty()
                 || row.path.to_string_lossy().to_lowercase().contains(&query)
+                || row
+                    .member
+                    .as_ref()
+                    .is_some_and(|member| member.to_lowercase().contains(&query))
                 || row.result.status.label().to_lowercase().contains(&query)
                 || row.result.candidates.iter().any(|candidate| {
                     candidate.entry.game.to_lowercase().contains(&query)
@@ -142,7 +146,8 @@ fn query_rows_filtered(
             Sort::Status => status_rank(&a.result.status).cmp(&status_rank(&b.result.status)),
             Sort::Size => a.size.cmp(&b.size),
         }
-        .then_with(|| a.path.cmp(&b.path));
+        .then_with(|| a.path.cmp(&b.path))
+        .then_with(|| a.member.cmp(&b.member));
         if descending { order.reverse() } else { order }
     });
     visible

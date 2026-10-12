@@ -159,9 +159,9 @@ fn supported_extensions_without_catalogs_are_unknown_and_never_infer_a_system() 
 #[test]
 fn archives_discs_and_packages_cannot_be_enabled_by_a_dat_extension() {
     let directory = tempfile::tempdir().unwrap();
-    let extensions = [
-        "zip", "7z", "rar", "iso", "cue", "chd", "rvz", "cia", "nsp", "xci",
-    ];
+    // ZIPs are opened and their members checked (see zip_archives.rs); every other
+    // container still needs an adapter.
+    let extensions = ["7z", "rar", "iso", "cue", "chd", "rvz", "cia", "nsp", "xci"];
     let mut catalogs = vec![];
     for extension in extensions {
         let filename = format!("Unsupported.{extension}");
@@ -175,6 +175,17 @@ fn archives_discs_and_packages_cannot_be_enabled_by_a_dat_extension() {
         assert!(record.digests.is_none());
         assert!(record.result.explanation.contains("adapter"));
     }
+    // A file named .zip that is not a ZIP is unreadable, never hashed as a loose ROM.
+    std::fs::write(directory.path().join("Fake.zip"), b"container").unwrap();
+    let fake = scan(
+        directory.path(),
+        vec![catalog("Container system", "Fake.zip", b"container")],
+    )
+    .into_iter()
+    .find(|r| r.path.ends_with("Fake.zip"))
+    .unwrap();
+    assert_eq!(fake.result.status, Verification::ReadError);
+    assert!(fake.digests.is_none());
     let index = CatalogIndex::new(vec![catalog(
         "Container system",
         "Canonical.zip",
@@ -237,6 +248,7 @@ fn system_search_and_filter_preserve_cross_system_ambiguity_and_unknown_rows() {
     let records = vec![
         FileRecord {
             path: "shared.rom".into(),
+            member: None,
             size: Some(6),
             digests: Some(digests(b"shared")),
             header: None,
@@ -246,6 +258,7 @@ fn system_search_and_filter_preserve_cross_system_ambiguity_and_unknown_rows() {
         },
         FileRecord {
             path: "unknown.rom".into(),
+            member: None,
             size: Some(7),
             digests: Some(digests(b"unknown")),
             header: None,

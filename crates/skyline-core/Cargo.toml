@@ -15,6 +15,7 @@ md-5.workspace = true
 crc32fast.workspace = true
 quick-xml.workspace = true
 rusqlite.workspace = true
+zip.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"

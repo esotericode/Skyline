@@ -63,6 +63,7 @@ fn main() -> anyhow::Result<()> {
                 };
                 FileRecord {
                     path: format!("synthetic/Fixture {id:06}.gb").into(),
+                    member: None,
                     size: Some(3),
                     digests: Some(digests),
                     header: None,

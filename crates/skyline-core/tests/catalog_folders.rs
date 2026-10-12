@@ -138,6 +138,7 @@ fn broken_replacement_retains_previous_then_prunes_unused_versions_but_keeps_cit
     store
         .save_completed_scan(&[skyline_core::model::FileRecord {
             path: "Game.gba".into(),
+            member: None,
             size: Some(size),
             digests: Some(digests),
             header: None,
