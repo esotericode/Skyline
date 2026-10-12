@@ -70,7 +70,7 @@ sort. Sources use SHA-256 plus system instead of unstable array indices. Changes
 after a 500 ms idle debounce via the job worker. Jobs delay that save until idle; quit
 flushes the latest edit on a worker after an outstanding save finishes. Broken settings
 fall back visibly to defaults without replacing the stored payload on startup. Settings
-never authorize imports, scans or source mutations. JSON payloads are capped at 1 MiB.
+never authorize imports, scans or source mutations. Preference controls wait for the initial restore before accepting edits, so startup cannot overwrite newly typed values. JSON payloads are capped at 1 MiB.
 
 rfd 0.15.4 supplies native pickers, parented to the eframe window and invoked on a
 worker. Selection fills a path only; Import/Scan remain explicit. Cancelling preserves

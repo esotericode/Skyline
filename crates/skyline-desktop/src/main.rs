@@ -546,6 +546,8 @@ impl Skyline {
         });
         egui::SidePanel::left("sources").default_width(245.0).width_range(200.0..=420.0).resizable(true).show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
+                // Restoring preferences must finish before the user can edit them.
+                if !self.settings_loaded && self.receiver.is_some() { ui.disable(); }
                 ui.add_space(8.0);
                 ui.heading("Sources");
                 ui.label("References for the next scan");
@@ -762,6 +764,7 @@ impl Skyline {
         self.keyboard_navigation(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
+                if !self.settings_loaded && self.receiver.is_some() { ui.disable(); }
                 ui.heading("Collection");
                 ui.add_space(8.0);
                 let mut changed = false;
