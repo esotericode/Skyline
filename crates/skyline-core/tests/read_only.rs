@@ -373,6 +373,7 @@ fn database_roundtrip_retains_immutable_snapshot_and_completed_collection() {
         size: Some(3),
         digests: Some(hashes()),
         header: None,
+        format: None,
         result: identify("crc=\"352441c2\""),
     };
     store.save_completed_scan(&[record]).unwrap();
@@ -444,6 +445,7 @@ fn view_search_filter_and_sort_use_original_and_reference_names() {
         size: Some(size),
         digests: Some(hashes()),
         header: None,
+        format: None,
         result,
     };
     let rows = vec![
@@ -526,9 +528,13 @@ fn descriptive_rom_attributes_do_not_block_verification() {
     );
     assert_eq!(result.status, Verification::Exact);
     assert!(result.candidates[0].entry.unsupported_algorithms.is_empty());
-    // A copier header changes which bytes the digests describe; stay fail-closed.
+    // Header metadata describes the reference, rather than authorizing a transform.
     let result = identify("size=\"3\" crc=\"352441c2\" header=\"4E 45 53 1A\"");
-    assert_eq!(result.status, Verification::Unsupported);
+    assert_eq!(result.status, Verification::CrcOnly);
+    assert_eq!(
+        result.candidates[0].entry.reference_header.as_deref(),
+        Some("4E 45 53 1A")
+    );
 }
 
 #[test]
@@ -548,6 +554,7 @@ fn view_sorts_names_case_insensitively_and_status_by_strength() {
         size: Some(3),
         digests: Some(hashes()),
         header: None,
+        format: None,
         result,
     };
     let unknown = || CatalogIndex::new(vec![]).identify(3, &hashes());

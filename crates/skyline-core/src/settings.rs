@@ -28,7 +28,7 @@ impl CatalogChoice {
 }
 
 /// Bump when a saved field changes meaning, and migrate it in `AppSettings::migrate`.
-pub const SETTINGS_REVISION: u32 = 1;
+pub const SETTINGS_REVISION: u32 = 2;
 
 /// Local preferences only. They never authorize a scan/import or a source mutation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +38,7 @@ pub struct AppSettings {
     #[serde(default)]
     pub revision: u32,
     pub dat_path: String,
+    pub dat_folder: String,
     pub root_path: String,
     pub exclusions: String,
     pub system: String,
@@ -54,6 +55,7 @@ impl Default for AppSettings {
         Self {
             revision: SETTINGS_REVISION,
             dat_path: String::new(),
+            dat_folder: String::new(),
             root_path: String::new(),
             exclusions: String::new(),
             system: String::new(),
@@ -74,6 +76,14 @@ impl AppSettings {
     pub fn migrate(mut self) -> Self {
         if self.revision < 1 {
             self.system.clear();
+        }
+        if self.revision < 2 {
+            // The folder workflow considers every variant. A stale single-catalog
+            // preference must not silently restrict a mixed collection scan.
+            self.preferred_catalog = None;
+            self.collection_system = self
+                .collection_system
+                .map(|label| crate::systems::system_family(&label).to_owned());
         }
         self.revision = SETTINGS_REVISION;
         self

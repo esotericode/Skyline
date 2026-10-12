@@ -239,6 +239,7 @@ fn system_search_and_filter_preserve_cross_system_ambiguity_and_unknown_rows() {
             size: Some(6),
             digests: Some(digests(b"shared")),
             header: None,
+            format: None,
             result: ambiguous,
         },
         FileRecord {
@@ -246,6 +247,7 @@ fn system_search_and_filter_preserve_cross_system_ambiguity_and_unknown_rows() {
             size: Some(7),
             digests: Some(digests(b"unknown")),
             header: None,
+            format: None,
             result: index.identify(7, &digests(b"unknown")),
         },
     ];

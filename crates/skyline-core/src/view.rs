@@ -41,6 +41,24 @@ pub fn query_rows(
     query_rows_in_system(records, query, status, None, sort, descending)
 }
 
+pub fn query_rows_in_family(
+    records: &[FileRecord],
+    query: &str,
+    status: Option<&Verification>,
+    family: Option<&str>,
+    sort: Sort,
+    descending: bool,
+) -> Vec<usize> {
+    query_rows_filtered(
+        records,
+        query,
+        status,
+        |_, row| family.is_none_or(|family| crate::systems::row_in_family(row, family)),
+        sort,
+        descending,
+    )
+}
+
 /// Filtering an ambiguous row never resolves its identity or discards candidates.
 /// Only catalog-supported candidate systems participate; extensions are not evidence.
 pub fn query_rows_in_system(
@@ -51,17 +69,54 @@ pub fn query_rows_in_system(
     sort: Sort,
     descending: bool,
 ) -> Vec<usize> {
+    query_rows_filtered(
+        records,
+        query,
+        status,
+        |_, row| {
+            system.is_none_or(|system| row.result.candidates.iter().any(|c| c.system == system))
+        },
+        sort,
+        descending,
+    )
+}
+
+/// Uses precomputed collection membership, including dynamic unique-extension hints.
+pub fn query_rows_in_collection_system(
+    records: &[FileRecord],
+    query: &str,
+    status: Option<&Verification>,
+    system: Option<&crate::systems::CollectionSystem>,
+    sort: Sort,
+    descending: bool,
+) -> Vec<usize> {
+    query_rows_filtered(
+        records,
+        query,
+        status,
+        |id, _| system.is_none_or(|system| system.rows.contains(&id)),
+        sort,
+        descending,
+    )
+}
+
+fn query_rows_filtered(
+    records: &[FileRecord],
+    query: &str,
+    status: Option<&Verification>,
+    accepts: impl Fn(usize, &FileRecord) -> bool,
+    sort: Sort,
+    descending: bool,
+) -> Vec<usize> {
     let query = query.to_lowercase();
     let mut visible: Vec<_> = records
         .iter()
         .enumerate()
-        .filter(|(_, row)| {
+        .filter(|(id, row)| {
             if status.is_some_and(|status| row.result.status != *status) {
                 return false;
             }
-            if system
-                .is_some_and(|system| !row.result.candidates.iter().any(|c| c.system == system))
-            {
+            if !accepts(*id, row) {
                 return false;
             }
             query.is_empty()

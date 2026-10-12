@@ -11,7 +11,7 @@ use skyline_core::{
 use std::path::Path;
 
 fn imported() -> ImportedCatalog {
-    let snapshot = br#"<datafile><header><name>Migration fixture</name><version>1</version></header><game name="Synthetic"><rom name="synthetic.gb" size="3" sha1="a9993e364706816aba3e25717850c26c9cd0d89d" serial="DMG-XYZ" mia="no"/></game></datafile>"#.to_vec();
+    let snapshot = br#"<datafile><header><name>Migration fixture</name><version>1</version></header><game name="Synthetic"><rom name="synthetic.gb" size="3" sha1="a9993e364706816aba3e25717850c26c9cd0d89d" serial="DMG-XYZ" mia="no" header="!none"/></game></datafile>"#.to_vec();
     let mut catalog = parse_dat(
         &snapshot,
         Path::new("synthetic.dat"),
@@ -32,7 +32,7 @@ fn v1_database(path: &Path, imported: &ImportedCatalog) -> FileRecord {
         CREATE TABLE collection(id INTEGER PRIMARY KEY,path TEXT NOT NULL,status TEXT NOT NULL,sha256 TEXT,json TEXT NOT NULL);
         PRAGMA user_version=1;").unwrap();
     let mut old = imported.catalog.clone();
-    old.entries[0].unsupported_algorithms = vec!["serial".into(), "mia".into()];
+    old.entries[0].unsupported_algorithms = vec!["serial".into(), "mia".into(), "header".into()];
     let sha = &old.provenance.snapshot_sha256;
     connection
         .execute(
@@ -58,6 +58,7 @@ fn v1_database(path: &Path, imported: &ImportedCatalog) -> FileRecord {
         size: Some(size),
         digests: Some(digests),
         header: None,
+        format: None,
         result,
     };
     connection
@@ -111,7 +112,7 @@ fn migration_refreshes_cached_entries_preserving_snapshots_provenance_and_histor
         connection
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        2
+        3
     );
 }
 
@@ -194,6 +195,7 @@ fn settings_round_trip_and_future_optional_fields_preserve_choices() {
     let settings = AppSettings {
         revision: skyline_core::settings::SETTINGS_REVISION,
         dat_path: "references/synthetic.dat".into(),
+        dat_folder: "references".into(),
         root_path: "roms/試験".into(),
         exclusions: "Backups\nUnsorted".into(),
         system: "Game Boy Color".into(),

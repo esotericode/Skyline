@@ -66,6 +66,7 @@ fn main() -> anyhow::Result<()> {
                     size: Some(3),
                     digests: Some(digests),
                     header: None,
+                    format: None,
                     result,
                 }
             })

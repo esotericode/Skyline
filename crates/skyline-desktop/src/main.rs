@@ -6,15 +6,15 @@ use anyhow::{Context, Result};
 use eframe::egui::{self, Color32, RichText};
 use skyline_core::{
     VERSION,
-    catalog::import_path,
-    formats::SYSTEM_PRESETS,
+    catalog_folder::IntakeReport,
     hash::Cancellation,
     matching::CatalogIndex,
     model::{Catalog, FileRecord, Verification},
     scan::{ScanOptions, ScanProgress, scan_folder},
-    settings::{AppSettings, CatalogChoice, SETTINGS_REVISION},
+    settings::{AppSettings, SETTINGS_REVISION},
     store::Store,
-    view::{Sort, display_path, format_size, format_utc, query_rows_in_system},
+    systems::{CollectionSystem, collection_systems, system_family},
+    view::{Sort, display_path, format_size, format_utc, query_rows_in_collection_system},
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -29,8 +29,9 @@ use std::{
 enum Event {
     Progress(ScanProgress),
     Loaded(Box<LoadedState>),
-    Imported(Vec<Catalog>),
-    Scanned(Vec<FileRecord>, String),
+    References(Box<ReferenceState>),
+    CatalogProgress(usize, usize, PathBuf),
+    Scanned(Vec<FileRecord>, Vec<CollectionSystem>, String),
     Failed(String),
     SettingsSaved(Box<AppSettings>),
     SettingsFailed(String),
@@ -38,29 +39,34 @@ enum Event {
 }
 
 struct LoadedState {
-    catalogs: Vec<Catalog>,
+    catalogs: Arc<Vec<Catalog>>,
     records: Vec<FileRecord>,
     settings: AppSettings,
     settings_warning: Option<String>,
+    intake: Option<IntakeReport>,
+    systems: Vec<CollectionSystem>,
+}
+
+struct ReferenceState {
+    catalogs: Arc<Vec<Catalog>>,
+    intake: Option<IntakeReport>,
+    warning: Option<String>,
 }
 
 #[derive(Clone, Copy)]
 enum PathChoice {
-    Dat,
+    Dats,
     Folder,
 }
 
 enum Job {
     Load,
-    Import {
-        path: PathBuf,
-        system: String,
-    },
+    SyncCatalogFolder(PathBuf),
     Scan {
         root: PathBuf,
         exclusions: Vec<PathBuf>,
         catalogs: Arc<Vec<Catalog>>,
-        selected: Option<usize>,
+        dat_folder: Option<PathBuf>,
     },
     SaveSettings(AppSettings),
     PickPath {
@@ -91,33 +97,71 @@ fn run_job(
                         )),
                     ),
                 };
+                let catalogs = store.active_catalogs(
+                    (!settings.dat_folder.is_empty())
+                        .then(|| std::path::Path::new(&settings.dat_folder)),
+                )?;
+                let records = store.collection()?;
+                let systems = collection_systems(&records, &catalogs);
                 Ok(Event::Loaded(Box::new(LoadedState {
-                    catalogs: store.catalogs()?,
-                    records: store.collection()?,
+                    catalogs: Arc::new(catalogs),
+                    records,
+                    systems,
+                    intake: if settings.dat_folder.is_empty() {
+                        None
+                    } else {
+                        store.catalog_folder_report(std::path::Path::new(&settings.dat_folder))?
+                    },
                     settings,
                     settings_warning,
                 })))
             }
-            Job::Import { path, system } => {
+            Job::SyncCatalogFolder(path) => {
                 let mut store = Store::open_cancellable(&database, &cancel)?;
-                let imported = import_path(&path, &system, &cancel)?;
-                cancel.check()?;
-                store.import_catalog(&imported)?;
-                Ok(Event::Imported(store.catalogs()?))
+                let intake = sync_references(&mut store, &path, &cancel, &sender, &ctx)?;
+                Ok(Event::References(Box::new(ReferenceState {
+                    catalogs: Arc::new(store.active_catalogs(Some(&path))?),
+                    intake: Some(intake),
+                    warning: None,
+                })))
             }
             Job::Scan {
                 root,
                 exclusions,
                 catalogs,
-                selected,
+                dat_folder,
             } => {
                 let mut store = Store::open_cancellable(&database, &cancel)?;
-                let catalogs = if let Some(id) = selected {
-                    vec![catalogs[id].clone()]
+                let catalogs = if let Some(path) = dat_folder {
+                    let (intake, warning) =
+                        match sync_references(&mut store, &path, &cancel, &sender, &ctx) {
+                            Ok(report) => (Some(report), None),
+                            Err(error) => {
+                                cancel.check()?;
+                                let cached = store.active_catalogs(Some(&path))?;
+                                if cached.is_empty() {
+                                    return Err(error);
+                                }
+                                (
+                                    store.catalog_folder_report(&path)?,
+                                    Some(format!(
+                                        "DAT folder unavailable; using saved references. {error:#}"
+                                    )),
+                                )
+                            }
+                        };
+                    let active = Arc::new(store.active_catalogs(Some(&path))?);
+                    sender.send(Event::References(Box::new(ReferenceState {
+                        catalogs: active.clone(),
+                        intake,
+                        warning,
+                    })))?;
+                    ctx.request_repaint();
+                    active
                 } else {
-                    catalogs.as_ref().clone()
+                    catalogs
                 };
-                let index = CatalogIndex::new(catalogs);
+                let index = CatalogIndex::from_shared(catalogs);
                 let mut last_progress = Instant::now() - Duration::from_secs(1);
                 let report = scan_folder(
                     &root,
@@ -147,7 +191,8 @@ fn run_job(
                         report.hashed_bytes as f64 / 1_048_576.0
                     )
                 };
-                Ok(Event::Scanned(report.records, status))
+                let systems = index.collection_systems(&report.records);
+                Ok(Event::Scanned(report.records, systems, status))
             }
             Job::SaveSettings(settings) => {
                 Store::open_cancellable(&database, &cancel)?.save_settings(&settings)?;
@@ -155,8 +200,7 @@ fn run_job(
             }
             Job::PickPath { kind, dialog } => {
                 let path = match kind {
-                    PathChoice::Dat => dialog.pick_file(),
-                    PathChoice::Folder => dialog.pick_folder(),
+                    PathChoice::Dats | PathChoice::Folder => dialog.pick_folder(),
                 };
                 Ok(Event::PathPicked(
                     kind,
@@ -176,6 +220,23 @@ fn run_job(
     ctx.request_repaint();
 }
 
+fn sync_references(
+    store: &mut Store,
+    path: &std::path::Path,
+    cancel: &Cancellation,
+    sender: &SyncSender<Event>,
+    ctx: &egui::Context,
+) -> Result<IntakeReport> {
+    let mut last = Instant::now() - Duration::from_secs(1);
+    store.sync_catalog_folder(path, cancel, |done, total, path| {
+        if last.elapsed() >= Duration::from_millis(100) || done == total {
+            let _ = sender.try_send(Event::CatalogProgress(done, total, path.into()));
+            ctx.request_repaint();
+            last = Instant::now();
+        }
+    })
+}
+
 struct Skyline {
     database: PathBuf,
     catalogs: Arc<Vec<Catalog>>,
@@ -185,15 +246,16 @@ struct Skyline {
     search: String,
     status_filter: Option<Verification>,
     collection_system: Option<String>,
-    matched_systems: Vec<String>,
+    matched_systems: Vec<CollectionSystem>,
     sort: Sort,
     descending: bool,
     selected_row: Option<usize>,
-    selected_catalog: Option<usize>,
-    dat_path: String,
+    dat_folder: String,
+    intake: Option<IntakeReport>,
+    catalog_progress: Option<(usize, usize, PathBuf)>,
+    syncing_only: bool,
     root_path: String,
     exclusions: String,
-    system: String,
     status: String,
     error: Option<String>,
     progress: Option<ScanProgress>,
@@ -234,11 +296,12 @@ impl Skyline {
             sort: Sort::Name,
             descending: false,
             selected_row: None,
-            selected_catalog: None,
-            dat_path: String::new(),
+            dat_folder: String::new(),
+            intake: None,
+            catalog_progress: None,
+            syncing_only: false,
             root_path: String::new(),
             exclusions: String::new(),
-            system: String::new(),
             status: "Loading local collection…".into(),
             error: None,
             progress: None,
@@ -270,6 +333,8 @@ impl Skyline {
         self.cancel = Cancellation::default();
         self.receiver = Some(receiver);
         let quiet = matches!(&job, Job::SaveSettings(_));
+        self.syncing_only = matches!(&job, Job::SyncCatalogFolder(_));
+        self.catalog_progress = None;
         self.saving_preferences = quiet;
         self.picker_open = matches!(&job, Job::PickPath { .. });
         if !quiet {
@@ -307,7 +372,8 @@ impl Skyline {
         }
     }
 
-    fn poll(&mut self) {
+    fn poll(&mut self, ctx: &egui::Context) {
+        let mut sync_folder = false;
         let events: Vec<_> = self
             .receiver
             .as_ref()
@@ -315,30 +381,42 @@ impl Skyline {
             .unwrap_or_default();
         for event in events {
             match event {
-                Event::Progress(progress) => self.progress = Some(progress),
+                Event::Progress(progress) => {
+                    self.catalog_progress = None;
+                    self.progress = Some(progress);
+                }
+                Event::CatalogProgress(done, total, path) => {
+                    self.catalog_progress = Some((done, total, path))
+                }
                 Event::Loaded(state) => {
-                    self.catalogs = Arc::new(state.catalogs);
+                    self.catalogs = state.catalogs;
+                    self.intake = state.intake;
                     self.apply_settings(&state.settings);
                     self.last_saved_settings = state.settings;
                     self.tracked_settings = self.current_settings();
                     self.settings_loaded = true;
                     self.error = state.settings_warning;
-                    self.set_records(state.records);
+                    self.set_records(state.records, state.systems);
                     self.status =
                         "Ready · saved results are historical; rescan to refresh byte evidence"
                             .into();
                     self.finish();
                 }
-                Event::Imported(catalogs) => {
-                    let preferred = self.current_settings().preferred_catalog;
-                    self.catalogs = Arc::new(catalogs);
-                    self.selected_catalog =
-                        preferred.and_then(|choice| choice.resolve(&self.catalogs));
-                    self.status = "Catalog imported · rescan to use updated references".into();
-                    self.finish();
+                Event::References(state) => {
+                    self.catalogs = state.catalogs;
+                    self.intake = state.intake;
+                    self.error = state.warning;
+                    self.refresh_system_catalog_counts();
+                    self.status = format!(
+                        "{} catalogs ready · variants selected automatically",
+                        self.catalogs.len()
+                    );
+                    if self.syncing_only {
+                        self.finish();
+                    }
                 }
-                Event::Scanned(records, status) => {
-                    self.set_records(records);
+                Event::Scanned(records, systems, status) => {
+                    self.set_records(records, systems);
                     self.status = status;
                     self.finish();
                 }
@@ -362,7 +440,14 @@ impl Skyline {
                         match text {
                             Ok(text) => {
                                 match kind {
-                                    PathChoice::Dat => self.dat_path = text,
+                                    PathChoice::Dats => {
+                                        self.dat_folder = text;
+                                        self.catalogs = Arc::new(vec![]);
+                                        self.intake = None;
+                                        self.matched_systems =
+                                            collection_systems(&self.records, &self.catalogs);
+                                        sync_folder = true;
+                                    }
                                     PathChoice::Folder => self.root_path = text,
                                 }
                                 self.status = "Path selected · ready when you are".into();
@@ -379,11 +464,15 @@ impl Skyline {
                 }
             }
         }
+        if sync_folder && !self.quit_after_picker {
+            self.start(Job::SyncCatalogFolder(self.dat_folder.clone().into()), ctx);
+        }
     }
 
     fn finish(&mut self) {
         self.receiver = None;
         self.progress = None;
+        self.catalog_progress = None;
         self.picker_open = false;
         // Final events arrive only after the worker's database writes have finished.
         self.worker = None;
@@ -393,14 +482,12 @@ impl Skyline {
     fn current_settings(&self) -> AppSettings {
         AppSettings {
             revision: SETTINGS_REVISION,
-            dat_path: self.dat_path.clone(),
+            dat_folder: self.dat_folder.clone(),
+            dat_path: String::new(),
             root_path: self.root_path.clone(),
             exclusions: self.exclusions.clone(),
-            system: self.system.clone(),
-            preferred_catalog: self
-                .selected_catalog
-                .and_then(|id| self.catalogs.get(id))
-                .map(CatalogChoice::from_catalog),
+            system: String::new(),
+            preferred_catalog: None,
             search: self.search.clone(),
             status_filter: self.status_filter.clone(),
             collection_system: self.collection_system.clone(),
@@ -410,14 +497,9 @@ impl Skyline {
     }
 
     fn apply_settings(&mut self, settings: &AppSettings) {
-        self.dat_path = settings.dat_path.clone();
+        self.dat_folder = settings.dat_folder.clone();
         self.root_path = settings.root_path.clone();
         self.exclusions = settings.exclusions.clone();
-        self.system = settings.system.clone();
-        self.selected_catalog = settings
-            .preferred_catalog
-            .as_ref()
-            .and_then(|choice| choice.resolve(&self.catalogs));
         self.search = settings.search.clone();
         self.status_filter = settings.status_filter.clone();
         self.collection_system = settings.collection_system.clone();
@@ -454,17 +536,12 @@ impl Skyline {
     fn pick_path(&mut self, kind: PathChoice, ctx: &egui::Context, frame: &eframe::Frame) {
         let dialog = rfd::FileDialog::new().set_parent(frame);
         let dialog = match kind {
-            PathChoice::Dat => {
-                let dialog = dialog
-                    .set_title("Choose a reference DAT")
-                    .add_filter("XML DAT catalogs", &["dat", "xml"]);
-                if let Some(parent) = PathBuf::from(&self.dat_path)
-                    .parent()
-                    .filter(|p| !p.as_os_str().is_empty())
-                {
-                    dialog.set_directory(parent)
-                } else {
+            PathChoice::Dats => {
+                let dialog = dialog.set_title("Choose your DAT folder");
+                if self.dat_folder.is_empty() {
                     dialog
+                } else {
+                    dialog.set_directory(&self.dat_folder)
                 }
             }
             PathChoice::Folder => {
@@ -479,19 +556,16 @@ impl Skyline {
         self.start(Job::PickPath { kind, dialog }, ctx);
     }
 
-    fn set_records(&mut self, records: Vec<FileRecord>) {
-        self.matched_systems = records
-            .iter()
-            .flat_map(|record| {
-                record
-                    .result
-                    .candidates
-                    .iter()
-                    .map(|candidate| candidate.system.clone())
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
+    fn set_records(&mut self, records: Vec<FileRecord>, systems: Vec<CollectionSystem>) {
+        self.matched_systems = systems;
+        if self.collection_system.as_ref().is_some_and(|family| {
+            !self
+                .matched_systems
+                .iter()
+                .any(|system| &system.name == family)
+        }) {
+            self.collection_system = None;
+        }
         self.records = records;
         self.selected_row = None;
         self.duplicates.clear();
@@ -503,13 +577,30 @@ impl Skyline {
         self.filter_rows();
     }
 
+    fn refresh_system_catalog_counts(&mut self) {
+        for system in &mut self.matched_systems {
+            system.available_catalogs = self
+                .catalogs
+                .iter()
+                .filter(|catalog| {
+                    !catalog.entries.is_empty()
+                        && system_family(&catalog.provenance.system) == system.name
+                })
+                .count();
+        }
+    }
+
     fn filter_rows(&mut self) {
         self.scroll_request = Some(0.0);
-        self.visible = query_rows_in_system(
+        self.visible = query_rows_in_collection_system(
             &self.records,
             &self.search,
             self.status_filter.as_ref(),
-            self.collection_system.as_deref(),
+            self.collection_system.as_ref().and_then(|name| {
+                self.matched_systems
+                    .iter()
+                    .find(|system| &system.name == name)
+            }),
             self.sort,
             self.descending,
         );
@@ -553,6 +644,12 @@ impl Skyline {
                     self.records.len()
                 ));
             });
+            if let Some((done, total, path)) = &self.catalog_progress {
+                ui.label(format!(
+                    "Indexing DATs · {done}/{total} · {}",
+                    display_path(path)
+                ));
+            }
             if let Some(progress) = &self.progress {
                 ui.label(format!(
                     "{} complete · {:.1} MiB · {}",
@@ -570,29 +667,40 @@ impl Skyline {
                 // Restoring preferences must finish before the user can edit them.
                 if !self.settings_loaded && self.receiver.is_some() { ui.disable(); }
                 ui.add_space(8.0);
-                ui.heading("Sources");
-                ui.label("References for the next scan");
-                ui.radio_value(&mut self.selected_catalog, None, "All imported catalogs");
-                for (id, catalog) in self.catalogs.iter().enumerate() {
-                    ui.radio_value(&mut self.selected_catalog, Some(id), format!("{}\n{} · {}", catalog.provenance.system, catalog.name, catalog.version));
-                }
-                if self.catalogs.is_empty() { ui.label("Import a DAT to identify your files. Scans without references show Unknown."); }
-                ui.separator();
-                ui.heading("Import DAT");
-                ui.label("System override (optional)");
-                ui.add(egui::TextEdit::singleline(&mut self.system).hint_text("Use the DAT header name").desired_width(f32::INFINITY));
-                egui::ComboBox::from_id_salt("system").selected_text("Choose a system…").show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.system, String::new(), "From DAT header");
-                    for system in SYSTEM_PRESETS { ui.selectable_value(&mut self.system, (*system).into(), *system); }
+                ui.heading("Reference folder");
+                ui.small("Add your DAT collection once. Skyline checks every catalog and chooses matching variants automatically.");
+                ui.add(egui::TextEdit::singleline(&mut self.dat_folder).hint_text("C:\\Catalogs").desired_width(f32::INFINITY));
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(self.receiver.is_none(), egui::Button::new("Choose DAT folder…")).clicked() {
+                        self.pick_path(PathChoice::Dats, ctx, frame);
+                    }
+                    if ui.add_enabled(self.receiver.is_none() && !self.dat_folder.trim().is_empty(), egui::Button::new("Refresh")).clicked() {
+                        self.start(Job::SyncCatalogFolder(self.dat_folder.trim().into()), ctx);
+                    }
                 });
-                ui.label("Local XML DAT file path");
-                ui.add(egui::TextEdit::singleline(&mut self.dat_path).hint_text("C:\\Catalogs\\reference.dat").desired_width(f32::INFINITY));
-                if ui.add_enabled(self.receiver.is_none(), egui::Button::new("Browse DAT…")).clicked() {
-                    self.pick_path(PathChoice::Dat, ctx, frame);
+                ui.small(format!("{} catalogs ready", self.catalogs.len()));
+                if self.catalogs.is_empty() && self.dat_folder.is_empty() { ui.small("Choose a DAT folder to identify files. You can also scan first."); }
+                ui.collapsing("Reference details", |ui| {
+                    if let Some(report) = &self.intake {
+                        ui.small(format!("{} files found · {} parsed · {} cached · {} previous versions retained", report.discovered, report.parsed, report.cached, report.retained));
+                        for issue in &report.issues { ui.label(format!("{}: {}", display_path(&issue.path), issue.explanation)); }
+                        if report.omitted_issues > 0 { ui.label(format!("{} further issues omitted", report.omitted_issues)); }
+                    }
+                    ui.collapsing("All available catalogs", |ui| {
+                        for catalog in self.catalogs.iter() { ui.small(format!("{} · {}", catalog.name, catalog.version)); }
+                    });
+                });
+                ui.separator();
+                ui.heading("Your systems");
+                let mut changed = ui.selectable_value(&mut self.collection_system, None, "All files").changed();
+                for system in &self.matched_systems {
+                    changed |= ui.selectable_value(&mut self.collection_system, Some(system.name.clone()), &system.name).changed();
+                    ui.small(format!("{} matched · {} awaiting identification", system.matched_files, system.suggested_files));
+                    if system.available_catalogs == 0 && system.suggested_files > 0 { ui.small("No catalog available for this system. File extension suggests this family; bytes remain unverified."); }
+                    else if !system.used_catalogs.is_empty() { ui.small(format!("{} catalog variants used automatically", system.used_catalogs.len())); }
                 }
-                if ui.add_enabled(self.receiver.is_none() && !self.dat_path.trim().is_empty(), egui::Button::new("Import catalog")).clicked() {
-                    self.start(Job::Import { path: self.dat_path.trim().into(), system: self.system.clone() }, ctx);
-                }
+                if self.matched_systems.is_empty() { ui.small("Systems appear after scanning your files."); }
+                if changed { self.filter_rows(); }
                 ui.separator();
                 ui.heading("Scan folder");
                 ui.label("ROM folder path");
@@ -600,13 +708,15 @@ impl Skyline {
                 if ui.add_enabled(self.receiver.is_none(), egui::Button::new("Choose folder…")).clicked() {
                     self.pick_path(PathChoice::Folder, ctx, frame);
                 }
-                ui.label("Exclude relative prefixes (one per line)");
-                ui.add(egui::TextEdit::multiline(&mut self.exclusions).desired_rows(2).desired_width(f32::INFINITY).hint_text("Backups\nUnsorted"));
+                ui.collapsing("Scan options", |ui| {
+                    ui.label("Exclude relative prefixes (one per line)");
+                    ui.add(egui::TextEdit::multiline(&mut self.exclusions).desired_rows(2).desired_width(f32::INFINITY).hint_text("Backups\nUnsorted"));
+                });
                 if ui.add_enabled(self.receiver.is_none() && !self.root_path.trim().is_empty(), egui::Button::new("Scan and verify")).clicked() {
                     self.start(Job::Scan {
                         root: self.root_path.trim().into(),
                         exclusions: self.exclusions.lines().map(str::trim).filter(|s| !s.is_empty()).map(Into::into).collect(),
-                        catalogs: self.catalogs.clone(), selected: self.selected_catalog,
+                        catalogs: self.catalogs.clone(), dat_folder: (!self.dat_folder.trim().is_empty()).then(|| self.dat_folder.trim().into()),
                     }, ctx);
                 }
                 ui.small("Every scan rereads file bytes. Original files are preserved.");
@@ -639,6 +749,9 @@ impl Skyline {
                             .strong(),
                     );
                     ui.label(&record.result.explanation);
+                    ui.separator();
+                    ui.strong("Format & headers");
+                    for note in skyline_core::formats::header_notes(record) { ui.label(note); }
                     if let Some(size) = record.size {
                         ui.label(format!("{} ({size} bytes)", format_size(size)));
                     }
@@ -692,6 +805,7 @@ impl Skyline {
                                 "{} · {} · {}",
                                 candidate.system, candidate.catalog_name, candidate.catalog_version
                             ));
+                            if let Some(header) = &candidate.entry.reference_header { ui.label("Catalog header metadata"); ui.monospace(header); }
                             ui.label(format!(
                                 "Dump flag: {:?} ({})",
                                 candidate.entry.quality,
@@ -805,7 +919,9 @@ impl Skyline {
         self.keyboard_navigation(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if !self.settings_loaded && self.receiver.is_some() { ui.disable(); }
+                if !self.settings_loaded && self.receiver.is_some() {
+                    ui.disable();
+                }
                 ui.heading("Collection");
                 ui.add_space(8.0);
                 let mut changed = false;
@@ -839,30 +955,16 @@ impl Skyline {
                     self.filter_rows();
                 }
             });
-            ui.horizontal(|ui| {
-                if !self.settings_loaded && self.receiver.is_some() { ui.disable(); }
-                ui.label("Matched system");
-                let mut changed = false;
-                egui::ComboBox::from_id_salt("collection_system")
-                    .selected_text(self.collection_system.as_deref().unwrap_or("All systems"))
-                    .show_ui(ui, |ui| {
-                        changed |= ui.selectable_value(&mut self.collection_system, None, "All systems").changed();
-                        for system in &self.matched_systems {
-                            changed |= ui.selectable_value(&mut self.collection_system, Some(system.clone()), system).changed();
-                        }
-                    });
-                if changed { self.filter_rows(); }
-            });
             ui.add_space(6.0);
             if self.records.is_empty() {
                 ui.add_space(60.0);
                 ui.vertical_centered(|ui| {
                     ui.heading("Your collection, understood.");
                     ui.add_space(4.0);
-                    ui.label("Import a local DAT, enter a ROM folder, then scan and verify.");
+                    ui.label("Choose your DAT folder and ROM folder, then scan and verify.");
                     ui.label(
                         RichText::new(
-                            "Skyline compares file bytes with your selected references, entirely offline.",
+                            "Skyline picks matching catalogs automatically, entirely offline.",
                         )
                         .weak(),
                     );
@@ -873,7 +975,9 @@ impl Skyline {
             self.table_header(ui, &columns);
             if self.visible.is_empty() {
                 ui.add_space(24.0);
-                ui.vertical_centered(|ui| ui.label(RichText::new("No rows match this search and filter.").weak()));
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("No rows match this search and filter.").weak())
+                });
                 return;
             }
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1018,7 +1122,11 @@ impl Skyline {
                 record.result.candidates.len()
             ))
             .color(status_color(status)),
-            [first, ..] => RichText::new(format!("{} · {}", first.system, first.entry.game)),
+            [first, ..] => RichText::new(format!(
+                "{} · {}",
+                system_family(&first.system),
+                first.entry.game
+            )),
         };
         paint_cell(ui, columns.cell(rect, 2), matched, false);
         let size = record.size.map_or("—".into(), format_size);
@@ -1027,7 +1135,7 @@ impl Skyline {
             .result
             .candidates
             .iter()
-            .map(|candidate| candidate.system.as_str())
+            .map(|candidate| system_family(&candidate.system))
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>()
@@ -1142,7 +1250,7 @@ fn paint_cell(
 
 impl eframe::App for Skyline {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.poll();
+        self.poll(ctx);
         if self.receiver.is_some()
             && !self.picker_open
             && !self.saving_preferences

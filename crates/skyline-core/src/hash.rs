@@ -1,6 +1,6 @@
 use crate::{
-    formats::{HeaderRule, MAX_HEADER_BYTES, detect_header},
-    model::{Digests, HeaderEvidence},
+    formats::{HeaderRule, MAX_HEADER_BYTES, detect_header, inspect_format},
+    model::{Digests, FileFormat, HeaderEvidence},
 };
 use anyhow::{Context, Result, bail};
 use md5::Md5;
@@ -82,6 +82,7 @@ pub struct Hashed {
     pub size: u64,
     pub digests: Digests,
     pub header: Option<HeaderEvidence>,
+    pub format: Option<FileFormat>,
 }
 
 /// One pass over the bytes. `header` sees up to the first `MAX_HEADER_BYTES` bytes
@@ -144,6 +145,7 @@ pub fn hash_stream_with_header(
         size,
         digests: whole.finish(),
         header,
+        format: None,
     })
 }
 
@@ -184,9 +186,12 @@ pub fn hash_file(path: &Path, cancel: &Cancellation, progress: impl FnMut(u64)) 
         .unwrap_or_default()
         .to_string_lossy()
         .to_ascii_lowercase();
-    let result = hash_stream_with_header(&file, cancel, progress, |prefix| {
+    let mut format = None;
+    let mut result = hash_stream_with_header(&file, cancel, progress, |prefix| {
+        format = inspect_format(prefix, &extension, opened.len());
         detect_header(prefix, &extension, opened.len())
     })?;
+    result.format = format;
     let after = file.metadata()?;
     let path_after = std::fs::symlink_metadata(path).context("Rechecking source path")?;
     if is_link(&path_after)

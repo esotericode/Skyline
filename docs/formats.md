@@ -8,17 +8,18 @@ publisher statements.
 
 ## Available read-only workflow
 
-Import a UTF-8 Logiqx XML DAT for each desired system. The default system label is
-the DAT header name; an optional explicit override accepts any name. GUI suggestions
-are conveniences, not an allowlist. Select all catalogs and scan one folder containing
-multiple systems. Matching rows show their system, search includes system names, and
-the saved system filter narrows browsing without resolving ambiguous identities.
+Choose a folder containing UTF-8 Logiqx XML DATs, including nested subfolders.
+Skyline considers all current catalog variants automatically. Each file keeps its DAT
+header label; the CLI still accepts optional manual overrides for individual imports.
+The collection view groups variant labels into system families and lists only systems
+present in collection evidence or clearly labelled unmatched-file hints. Hints never
+verify bytes. Filters narrow browsing without resolving ambiguous identities. See
+[catalog folders](catalog-folders.md) for cache, errors and activation behavior.
 
 Common loose extensions can be fingerprinted without a DAT (then unmatched bytes
 are Unknown). An active DAT can additionally enable other loose extensions. Extensionless entries
-enable only extensionless files of a matching size (or any size when such an entry
-has none). Unrelated extensionless files at other sizes are skipped; matching sizes
-and size-unspecified entries can still cause unrelated files to be read. Known archives/disc containers/packages remain Unsupported
+enable only extensionless files of a matching size (or a DAT-declared basename when size is unspecified). Unrelated extensionless files at other sizes are skipped; matching sizes
+can still cause unrelated files to be read; unspecified sizes use declared basenames. Known archives/disc containers/packages remain Unsupported
 even when listed in a DAT: their contents require dedicated adapters.
 
 | Loose representation family | Common extensions checked |
@@ -47,14 +48,15 @@ cartridge content without these headers; some loose dump formats carry them:
 | iNES / NES 2.0 | `NES\x1A` at offset 0 | 16 |
 | Atari 7800 (A78) | `ATARI7800` at offset 1 | 128 |
 | Atari Lynx (LNX) | `LYNX\0` at offset 0 | 64 |
+| Famicom Disk System | `FDS\x1A` at offset 0 | 16 |
 | SNES copier | `.smc/.sfc/.swc/.fig` whose size is a 1 KiB multiple plus 512 | 512 |
 
 The same single read produces whole-file digests and, when a header is recognized,
 digests of the bytes after it. Whole-file matches take precedence, so catalogs that
 list headered files behave as before. Only when the whole file has no candidate is
 the header-free content compared; a match then says which header was excluded, and
-the details show both digest sets. The file on disk is never changed. DAT entries
-with a `header` attribute stay Unsupported, and N64 byte orders (.v64/.n64),
+the details show both digest sets. The file on disk is never changed. The No-Intro `header` attribute is preserved descriptive metadata, not a transform
+instruction. Headered NES entries verify whole-file hashes normally. N64 byte orders (.v64/.n64),
 interleaved Sega files, decryption and padding removal are not handled: such files
 must match the catalog's exact bytes, or they are Unknown, not a claim of corruption.
 Every supplied supported digest and expected size is checked.
@@ -89,3 +91,24 @@ and [CI run 38312007058](https://github.com/esotericode/Skyline/actions/runs/383
 desktop/CLI builds, shared-version checks and initial 0.0.1 testing artifact uploads.
 The scan fixture covers 37 common aliases; header tests cover SNES aliases, whole-file
 precedence and short reads across hashing-buffer boundaries. Prior PR histories are retained.
+
+## Format and header advice
+
+Fresh scans record recognized iNES/NES 2.0/A78/LNX/FDS signatures, probable SNES
+copier headers or their absence in supported filename representations, and N64
+byte-layout signatures. **Format & headers** explains those observations, the
+explicit Headered/Headerless catalog expectation, and relevant loader considerations.
+For NES, identifying headerless content does not recommend deleting the emulator
+header. Declared trainer bytes are retained in the comparison. SNES copier headers
+are distinct from internal cartridge metadata, which stays part of the ROM. Unknown
+formats/old rows do not receive invented header-absence claims. FDS content matching
+does not imply disk-structure or set completeness. No files or headers are rewritten.
+
+Technical references checked 2026-10-12: [NESdev iNES](https://www.nesdev.org/wiki/INES),
+[NES 2.0](https://www.nesdev.org/wiki/NES_2.0),
+[FDS file format](https://www.nesdev.org/wiki/FDS_file_format),
+[SNESdev ROM formats](https://snes.nesdev.org/wiki/ROM_file_formats),
+[N64 ROM layouts](https://n64dev.org/romformats.html), and the
+[No-Intro headered/headerless record](https://datomatic.nointro.org/index.php?n=2957&page=show_record&s=45).
+Search-cached primary-source excerpts were used where direct loads returned 403/timeouts.
+The actual No-Intro export provides header metadata alongside whole-file sizes/hashes.

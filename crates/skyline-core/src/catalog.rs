@@ -15,12 +15,13 @@ use std::{
 pub const MAX_DAT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 1_000_000;
 /// Increment whenever parsing semantics change so saved derived entries are refreshed.
-pub const PARSER_REVISION: i64 = 1;
+pub const PARSER_REVISION: i64 = 2;
 const MAX_TEXT: usize = 8192;
 /// Known Logiqx/No-Intro/MAME ROM attributes that describe an entry without changing
 /// which bytes the digests cover. Real DATs carry these on ordinary single-file entries.
-/// Anything else (including `header`, which implies a byte transformation) stays
-/// fail-closed as Unsupported.
+/// `header` is descriptive file metadata in No-Intro exports, not a hash-skipping
+/// instruction. Preserve it without using it to alter the compared bytes.
+/// Unknown requirements stay fail-closed as Unsupported.
 const DESCRIPTIVE_ATTRIBUTES: &[&str] = &[
     "serial",
     "date",
@@ -32,6 +33,7 @@ const DESCRIPTIVE_ATTRIBUTES: &[&str] = &[
     "optional",
     "dispose",
     "soundonly",
+    "header",
 ];
 
 pub struct ImportedCatalog {
@@ -40,14 +42,48 @@ pub struct ImportedCatalog {
 }
 
 pub fn import_path(path: &Path, system: &str, cancel: &Cancellation) -> Result<ImportedCatalog> {
-    let mut file = std::fs::File::open(path)
-        .context("Opening local DAT")?
-        .take(MAX_DAT_BYTES + 1);
+    let bytes = read_path(path, cancel)?;
+    let origin = path.canonicalize().context("Resolving local DAT origin")?;
+    let catalog = parse_dat(&bytes, &origin, system, cancel)?;
+    Ok(ImportedCatalog {
+        catalog,
+        snapshot: bytes,
+    })
+}
+
+/// Fingerprint every refresh rather than trusting size/mtime. Never follow a final
+/// link or accept a catalog that changed during the read.
+pub(crate) fn read_path(path: &Path, cancel: &Cancellation) -> Result<Vec<u8>> {
+    let before = std::fs::symlink_metadata(path)?;
+    if crate::hash::is_link(&before) || !before.is_file() {
+        bail!("DAT must be a regular file");
+    }
+    if before.len() > MAX_DAT_BYTES {
+        bail!("DAT exceeds the 64 MiB import limit");
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000);
+    }
+    let file = options.open(path).context("Opening local DAT read-only")?;
+    let opened = file.metadata()?;
+    if crate::hash::is_link(&opened) || !opened.is_file() {
+        bail!("DAT links are skipped");
+    }
+    let mut reader = (&file).take(MAX_DAT_BYTES + 1);
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 64 * 1024];
     loop {
         cancel.check()?;
-        let n = file.read(&mut chunk)?;
+        let n = reader.read(&mut chunk)?;
         if n == 0 {
             break;
         }
@@ -56,12 +92,30 @@ pub fn import_path(path: &Path, system: &str, cancel: &Cancellation) -> Result<I
             bail!("DAT exceeds the 64 MiB import limit");
         }
     }
-    let origin = path.canonicalize().context("Resolving local DAT origin")?;
-    let catalog = parse_dat(&bytes, &origin, system, cancel)?;
-    Ok(ImportedCatalog {
-        catalog,
-        snapshot: bytes,
-    })
+    cancel.check()?;
+    let after = file.metadata()?;
+    let path_after = std::fs::symlink_metadata(path)?;
+    if crate::hash::is_link(&path_after)
+        || opened.len() != bytes.len() as u64
+        || opened.len() != after.len()
+        || after.len() != path_after.len()
+        || opened.modified()? != after.modified()?
+        || after.modified()? != path_after.modified()?
+    {
+        bail!("DAT changed while reading; last usable reference retained");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if before.ino() != opened.ino()
+            || before.dev() != opened.dev()
+            || opened.ino() != path_after.ino()
+            || opened.dev() != path_after.dev()
+        {
+            bail!("DAT path changed while reading");
+        }
+    }
+    Ok(bytes)
 }
 
 fn attributes(event: &BytesStart<'_>, reader: &Reader<&[u8]>) -> Result<BTreeMap<String, String>> {
@@ -111,6 +165,7 @@ fn entry(attributes: &BTreeMap<String, String>, game: &str) -> Result<CatalogEnt
         filename,
         size: attributes
             .get("size")
+            .filter(|size| !size.trim().is_empty())
             .map(|s| s.parse::<u64>())
             .transpose()
             .context("Invalid ROM size")?,
@@ -122,6 +177,7 @@ fn entry(attributes: &BTreeMap<String, String>, game: &str) -> Result<CatalogEnt
         },
         quality,
         raw_status,
+        reference_header: attributes.get("header").cloned(),
         group_members: 1,
         unsupported_algorithms: attributes
             .keys()
@@ -260,8 +316,8 @@ pub fn parse_dat(
             _ => {}
         }
     }
-    if !root_closed || !stack.is_empty() || entries.is_empty() {
-        bail!("DAT is incomplete or contains no ROM entries");
+    if !root_closed || !stack.is_empty() {
+        bail!("DAT is incomplete");
     }
     let name = header
         .remove("name")

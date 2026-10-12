@@ -1,6 +1,6 @@
 # Skyline foundation
 
-Status: first read-only development slice, version 0.0.1. M0/M1 remain partial
+Status: first read-only development slice, version 0.0.2. M0/M1 remain partial
 until the platform and performance evidence in AGENTS.md is recorded.
 
 ## Decisions
@@ -33,7 +33,8 @@ never filename/extension inference. Import preserves
 exact XML bytes in an immutable SHA-256 snapshot with local origin, timestamp, DAT
 name/version, format, and unknown license status. External DOCTYPE identifiers are
 inert; internal DTD subsets/entities are rejected. UTF-8 Logiqx only, capped at
-64 MiB, one million entries, 32 levels and 8192 bytes per attribute/header field.
+64 MiB, one million entries, 32 levels and 8192 bytes per attribute/header field. Valid empty catalogs and unspecified
+sizes are accepted; descriptive reference header fields are retained.
 Failed imports retain prior catalogs. No provider requests or ROM uploads exist.
 
 Digest indexes find candidates; comparisons check all supplied supported digests
@@ -65,7 +66,7 @@ scans retain saved data; partial rows are temporary. SQLite uses WAL/FULL synchr
 Results are historical evidence. Search/sort runs on bounded in-memory rows on the
 GUI thread; measure it and move/index/page it if the target is exceeded.
 
-Database schema 2 records a parser revision for each derived catalog cache and one
+Database schema 3 records a parser revision for each derived catalog cache and one
 bounded preferences row. Opening schema 1 acquires an immediate transaction, checks
 each preserved snapshot's SHA-256/size and reparses its entries, keeping original
 origin/provider/license/time. Snapshot bytes and saved scan evidence remain unchanged.
@@ -73,23 +74,37 @@ Failures/cancellation roll back the entire migration. No original DAT file, netw
 request or database deletion is needed. Increment PARSER_REVISION for future semantic
 parser changes; newer schemas/parser caches reject older readers.
 
-Preferences include paths, exclusions, import system override, chosen source,
-query, matched-system/status filters and
-sort. The added optional system filter defaults to All systems in older settings;
-existing explicit import labels are retained. Parser revision stays 1: automatic
-labels apply only to new imports with an empty override, and no derived entries or
-existing provenance need reparsing/relabeling. Sources use SHA-256 plus system instead
-of unstable array indices. Changes save
-after a 500 ms idle debounce via the job worker. Jobs delay that save until idle; quit
-flushes the latest edit on a worker after an outstanding save finishes. Broken settings
-fall back visibly to defaults without replacing the stored payload on startup. Settings
-never authorize imports, scans or source mutations. Preference controls wait for the initial restore before accepting edits, so startup cannot overwrite newly typed values. JSON payloads are capped at 1 MiB.
+Schema 3 additionally separates immutable catalog history, deliberate manual imports,
+folder membership, and intake reports. Compact automatic-label/entry-count fields
+allow fingerprint-cache hits without XML parsing or full catalog JSON decoding.
+Folder sync runs inside an immediate transaction. Input read/parse failures are
+per-file; DB failures, cancellation and aggregate limits roll back the whole batch.
+Replaced/removed files retire from activation, retaining snapshots and scan evidence.
+The desktop uses the chosen folder only; CLI scans use active folders plus manual
+imports. See [catalog folders](catalog-folders.md) for complete activation rules.
 
-rfd 0.15.4 supplies native pickers, parented to the eframe window and invoked on a
-worker. Selection fills a path only; Import/Scan remain explicit. Cancelling preserves
-the old path. While a picker holds native parent handles, quitting is deferred until
-it returns, then the quit request is honored. Windows/Linux interactive dialog smoke
-tests and portal failure/focus behavior still need platform validation.
+Preferences include the DAT folder, ROM path, exclusions, query, family/status filters
+and sort. Revision 2 retires the previous single-catalog selection and maps saved
+system filters to display families. Older manual imports/overrides remain stored;
+folder intake always uses each DAT's own label. Display grouping never rewrites
+provenance or changes the matching identity. Extension hints for unmatched files are
+labelled and cannot establish verification. Only collection-relevant families appear
+in the main UI; all catalog and intake diagnostics remain accessible in disclosures.
+
+Changes save after a 500 ms idle debounce via the job worker. Jobs delay that save
+until idle; quit flushes the latest edit after an outstanding writer finishes.
+Malformed preferences fall back visibly without overwriting the startup payload.
+Restoring preferences does not start an import or scan. Controls wait for initial
+restoration before accepting edits. JSON preferences remain capped at 1 MiB.
+
+rfd 0.15.4 supplies native folder pickers on a worker, parented to eframe. Choosing
+a DAT folder explicitly requests indexing; this supersedes the old fill-path-only
+DAT picker. Choosing a ROM folder fills the path; **Scan and verify** stays explicit.
+Every scan refreshes the DAT source first. A previously indexed offline source uses
+its saved active references with a visible warning; an unavailable new source stops
+the scan. Cancellation closes no windows or source files unexpectedly. While a picker
+holds parent handles, quitting waits for it to return and does not start a new intake.
+Interactive Windows/Linux dialog checks still need platform validation.
 
 ## Open work
 

@@ -39,6 +39,8 @@ pub struct CatalogEntry {
     pub digests: Digests,
     pub quality: DumpQuality,
     pub raw_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_header: Option<String>,
     pub group_members: usize,
     pub unsupported_algorithms: Vec<String>,
 }
@@ -123,7 +125,16 @@ pub struct FileRecord {
     /// Absent in records saved before header detection existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header: Option<HeaderEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<FileFormat>,
     pub result: MatchResult,
+}
+
+/// Read-only observations, separate from catalog identity and verification.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FileFormat {
+    pub name: String,
+    pub notes: Vec<String>,
 }
 
 impl FileRecord {

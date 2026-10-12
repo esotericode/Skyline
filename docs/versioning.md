@@ -17,8 +17,8 @@ name binaries Skyline-vX.Y.Z-windows-x64; include checksums, commit and limitati
 verify the built About window and CLI display X.Y.Z. Testing releases may have
 incomplete milestones only when their release notes clearly state those limits.
 
-This change establishes source version 0.0.1 without creating a release, tag,
-installer or testing distribution. Routine CI checks source commits and does not
+Initial testing builds used 0.0.1. The DAT-folder development change advances
+source to 0.0.2; it does not itself create a tag, installer or testing distribution. Routine CI checks source commits and does not
 publish distinct releases. Do not claim a checklist passed because a build compiled.
 
 Development testing builds: CI on `main` (or a manual run) packages checked binaries

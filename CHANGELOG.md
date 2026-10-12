@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased multi-system follow-up
+## 0.0.2 — Unreleased
+
+- One recursive DAT-folder source replaces the per-file/system picker. Choosing the
+  folder indexes it; scans refresh it automatically and consider all active variants.
+- Collection-only system families, automatic variant matching and relevant missing
+  catalog hints; exact identities/ambiguities and full evidence remain in file details.
+- Unchanged fingerprints reuse parsed caches; duplicate files deduplicate; broken
+  replacements retain working references. Batch cancellation and storage/limit errors
+  roll back; removed/updated files retire from active scans while snapshots stay stored.
+- Schema 3 adds folder membership and compact automatic-cache metadata. Existing
+  manual imports and historical evidence survive; settings revision 2 saves the DAT
+  folder and retires the obsolete single-catalog selection.
+- Full 250-DAT Fresh1G1R No-Intro compatibility check; valid empty catalogs and
+  unspecified sizes; descriptive No-Intro header metadata no longer blocks NES.
+- Format/header observations, headered/headerless catalog expectations, FDS header
+  comparison and N64 signature notes; no payload/header rewriting.
+- Shared immutable catalogs and compact digest index reduce full-folder memory costs.
+- CLI `import-folder`, targeted synthetic regressions and local benchmarks.
+- Shared UI/CLI version advances to 0.0.2 for the next different testing distribution.
+
+## Previous multi-system follow-up (included in 0.0.1 testing builds)
 
 - Broad loose cartridge verification, using common extensions plus those declared
   by active DATs; custom and extensionless files no longer need system-specific code.
@@ -9,7 +29,7 @@
 - Known archives/disc containers/packages stay Unsupported even when declared by a
   DAT. Raw representations must match exact reference bytes; no normalization.
 
-## 0.0.1 — Unreleased
+## 0.0.1 — Development testing builds (2026-10-12)
 
 - Rust workspace, pinned toolchain, native GUI prototype and Windows/Linux CI.
 - Local UTF-8 Logiqx DAT import with immutable catalog provenance.

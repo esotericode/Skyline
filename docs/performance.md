@@ -141,3 +141,61 @@ those by -0.14/+2.57 ms. Whole-file in-memory four-hash throughput was 314.04 Mi
 (previously 298.67). The benchmark does not enable header detection. Headered files
 compute an additional four content hashes in the same I/O pass; their CPU/disk/GUI
 cost and the SNES detection heuristic still need representative measurements.
+
+
+## T017/T018 folder and header workflow — 2026-10-12
+
+Same restricted Ubuntu 24.04.3 / x86_64 / Rust 1.99.0, thin LTO/BFD, two Cargo
+workers; dependencies unchanged. CPU model, physical RAM/storage model and Windows
+reference machine remain unavailable. Commands: release `baseline`,
+`folder_baseline <local-DAT-folder>` and `system_view_baseline` examples. Inputs are
+local, not provider requests. Full-folder validation used Fresh1G1R commit f54f00d;
+third-party DATs stay outside the Skyline repository. First means a new disposable
+SQLite DB with a warm OS file cache, **not** a cold-storage/startup test. Repeat
+uses the same DB and fingerprints every input again. Compilation is excluded.
+
+| Input | Files / ROM entries | First intake (ms) | Repeat intake (ms) | Active JSON load first/repeat (ms) | Index first/repeat (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Supplied variants | 15 / 102,031 | 474.86 | 30.46 | 223.23 / 159.78 | 99.63 / 89.94 |
+| Full Fresh1G1R No-Intro, initial index | 250 / 971,723 | 3950.58 | 273.01 | 1700.03 / 1255.93 | 1506.33 / 1578.35 |
+| Full folder, compact digest index | 250 / 971,723 | 3992.67 | 255.95 | 2090.87 / 1284.55 | 1143.83 / 1092.47 |
+
+All input files parse without issues; repeats parse zero and use all caches. Three
+catalogs are valid empty exports; metadata-only lookup checks cover the other 247.
+No commercial ROM bytes were used; this establishes intake/index compatibility,
+not package/set decoder coverage. Cache hits avoid XML and full JSON decoding in
+intake, while active JSON loading/index construction are still separate costs.
+
+Linux `getrusage(RUSAGE_CHILDREN).ru_maxrss` for a fresh benchmark process observed
+1,266,556 → 1,157,328 KiB peak RSS after replacing heap hex keys and per-single-entry
+vectors with fixed digest keys/inline references: about 107 MiB / 8.6% lower.
+Full-folder index time also decreased in these samples. No concurrent compiler ran
+during the final core samples; preceding process/cache/allocator state differs and
+these single observations do not isolate causality. The uploaded-variant process
+observed 213,616 KiB. The full set remains roughly 1.1 GiB peak in this harness:
+**not a lightweight-memory acceptance pass**. GUI working set, release desktop peak,
+idle usage and named hardware measurements remain open. The desktop also shares
+immutable catalog entries instead of cloning the entire set for a scan; that UI
+saving is not included in this standalone example.
+
+| Source | Entries | Parse (ms) | Index (ms) | Match p95 (µs) | Global query/sort p95 (ms) | SQLite save/load (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Main review baseline | 10,000 | 12.23 | 3.53 | 0.50 | 1.73 | 43.29 / 33.60 |
+| DAT-folder final | 10,000 | 11.46 | 2.46 | 0.51 | 3.41 | 42.75 / 33.28 |
+| Main review baseline | 100,000 | 104.06 | 33.98 | 0.57 | 21.65 | 469.99 / 373.04 |
+| DAT-folder final | 100,000 | 109.07 | 24.31 | 0.59 | 18.32 | 551.18 / 396.19 |
+
+Global 10k query increased 1.68 ms (~97%) and 100k save increased
+81.19 ms (~17%); 100k index/query decreased. Runs have uncontrolled historical
+load differences, so no significance or per-feature causal claim. Four-hash memory
+throughput was 304.57 MiB/s versus main 314.04. Headered extra-hash disk/CPU cost is
+still outside this harness.
+
+The new mixed-system harness uses 80% synthetic exact/20% unknown rows, GBA, two N64
+variant identities and Toshiba Visicom, custom DAT extensions, reverse filename
+order, 100 alternating empty/`Fixture 00` queries and direction changes. It measures
+precomputed membership and the desktop's actual active-family query/sort function.
+10k/100k grouping: 4.54/41.94 ms; active N64 query p95: 1.86/17.41 ms. Grouping and
+catalog-derived hint generation run on the worker; the UI retains membership for
+filtering rather than reparsing catalog entries during frames. Rendering, native
+picker/focus/Windows frame/cancellation/steady memory acceptance remain unmeasured.

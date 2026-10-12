@@ -37,6 +37,7 @@ fn issue(path: PathBuf, status: Verification, explanation: String) -> FileRecord
         size: None,
         digests: None,
         header: None,
+        format: None,
         result: MatchResult {
             status,
             candidates: vec![],
@@ -169,6 +170,7 @@ pub fn scan_folder(
                     size: Some(hashed.size),
                     digests: Some(hashed.digests),
                     header: hashed.header,
+                    format: hashed.format,
                     result,
                 });
             }

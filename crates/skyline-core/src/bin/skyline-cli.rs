@@ -21,9 +21,14 @@ fn main() -> Result<()> {
             Store::open(Path::new(&args[1]))?.import_catalog(&imported)?;
             println!("Imported {count} entries into {}", args[1]);
         }
+        Some("import-folder") if args.len() == 3 => {
+            let mut store = Store::open(Path::new(&args[1]))?;
+            let report = store.sync_catalog_folder(Path::new(&args[2]), &cancel, |_, _, _| {})?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Some("scan") if args.len() >= 3 => {
             let mut store = Store::open(Path::new(&args[1]))?;
-            let index = CatalogIndex::new(store.catalogs()?);
+            let index = CatalogIndex::new(store.active_catalogs(None)?);
             let options = ScanOptions {
                 exclusions: args[3..].iter().map(Into::into).collect(),
             };
@@ -36,7 +41,7 @@ fn main() -> Result<()> {
         }
         _ => {
             eprintln!(
-                "Skyline {VERSION}\nUsage:\n  skyline-cli --version\n  skyline-cli import <database> <system|auto> <DAT>\n  skyline-cli scan <database> <folder> [excluded-relative-prefix ...]\nUse auto to take the system label from the DAT header. Scans use all imported catalogs.\nAll scans force rehash and are read-only. The database stores the last completed scan."
+                "Skyline {VERSION}\nUsage:\n  skyline-cli --version\n  skyline-cli import <database> <system|auto> <DAT>\n  skyline-cli import-folder <database> <DAT-folder>\n  skyline-cli scan <database> <folder> [excluded-relative-prefix ...]\nUse auto to take the system label from the DAT header. Scans use all imported catalogs.\nAll scans force rehash and are read-only. The database stores the last completed scan."
             );
             if !args.is_empty() {
                 bail!("Invalid command or arguments");
