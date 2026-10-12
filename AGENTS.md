@@ -1,4 +1,4 @@
-# ROM Manager: Project Plan and Agent Instructions
+# Skyline ROM Manager: Project Plan and Agent Instructions
 
 > Put this file at the repository root as `AGENTS.md`. Ask every coding agent to read it before making changes. It is the living project charter and the shared progress record. Rust, performance, and a minimalist, sleek GUI are owner requirements. Only choices explicitly labeled as proposed are provisional; the owner's instructions take precedence.
 
@@ -7,6 +7,8 @@ Plan created: 2026-10-12. Requirements last updated: 2026-10-12. Source policies
 ## 1. Purpose
 
 Build a desktop ROM manager that helps users understand, verify, rename, and organize their existing collections through a clear, attractive GUI.
+
+Product name: **Skyline**, confirmed by the owner on 2026-10-12. Every published testing/general build must use a coherent incrementing version, starting at 0.0.1, and expose that version in the UI. The root Cargo workspace version is the single source; see `docs/versioning.md` for release rules. Source 0.0.1 is currently unreleased.
 
 Deliver Windows support first, while keeping the core portable for a later Linux release. The program should work offline after reference catalogs have been imported. LLM agents may help develop the software; operating the application must not require an LLM or a paid cloud service.
 
@@ -223,15 +225,15 @@ Last updated: 2026-10-12.
 
 ### Current state
 
-- Completed: initial project charter, milestone definitions, source-policy review, and agent workflow; revised owner requirements for Rust, performance, and minimalist visual design, plus explicit dated history maintenance.
-- Implemented application features: none; this document does not establish an application repository or build.
-- Current milestone: M0.
-- Current focus: Rust foundation, GUI toolkit prototype and performance measurement plan, followed by a read-only loose-ROM verification slice.
-- Stack: Rust required; Rust-first GUI toolkit, toolchain version and supporting crates pending; SQLite proposed; code license pending.
-- Performance targets: proposed initial budgets documented in section 6; no application measurements yet.
+- Completed: charter/roadmap and initial Rust read-only source slice; product name and version policy confirmed. Local core checks are recorded below; milestones remain partial.
+- Implemented: UTF-8 Logiqx DAT import with immutable snapshot provenance; recursive loose-file streaming CRC32/MD5/SHA-1/SHA-256; deterministic exact/CRC-only/ambiguous/unknown/read-error/unsupported evidence; cancellation/exclusions/link skipping; SQLite catalogs and last completed scan; CLI and native collection-view prototype with search/filter/sort, source details, duplicates, progress and visible version.
+- Current milestones: M0 and M1 partially implemented; neither complete. No ZIP or file mutation features exist.
+- Current focus: validate Windows CI and native GUI; measure input/frame/startup/resource behavior; add native dialogs and persisted UI settings, then finish the read-only slice before ZIP.
+- Stack: Rust 1.99.0; two-crate Cargo workspace; egui/eframe 0.33.3 native prototype (provisional until Windows evaluation); rusqlite 0.37.0 with bundled SQLite. Direct pins and Cargo.lock committed. Code license pending owner selection; Windows 11 x64 and Windows 10 22H2 x64 are proposed test targets, not validated support.
+- Performance: reproducible 10,000/100,000-entry synthetic core harness and initial release-build Linux measurements in `docs/performance.md`. Query/sort p95 1.00/21.38 ms in that run. Hardware model/RAM counters unavailable; Windows reference machine and all GUI/resource budgets remain unmeasured.
 - Visual direction: minimalist, sleek, lightweight, highly functional GUI with clear information and restrained styling.
-- Checks run for application code: none; no application code was created for this plan.
-- Windows GUI, filesystem executor, and Linux GUI validation: not started.
+- Checks: local workspace check/build and 20 synthetic integration tests pass on Linux; direct rustfmt check passes. Clippy via the direct driver with -D warnings passes for all workspace targets. Windows/Linux remote CI results and references are pending.
+- Windows GUI, filesystem executor, and Linux GUI runtime validation: not started. Linux desktop compilation does not establish supported desktop operation.
 - Automated provider access: not enabled; endpoint permission and policy review pending.
 
 ### Task ledger
@@ -240,10 +242,10 @@ Last updated: 2026-10-12.
 | --- | --- | --- | --- | --- |
 | DOC-001 | Establish charter, roadmap, source review and agent handoff | done | None | This document; policy review dated 2026-10-12. |
 | DOC-002 | Incorporate owner's Rust, performance and GUI requirements; strengthen ongoing documentation | done | DOC-001 | Sections 1, 2, 6–9 revised; work history added; implementation status remains unstarted. |
-| T001 | Pin Rust toolchain and GUI toolkit, target Windows versions and code license; scaffold Cargo build and CI | not_started | None | Rust GUI prototype, decision rationale, measurement plan and successful clean build. |
-| T002 | Implement safe local Logiqx XML DAT import and snapshot provenance | not_started | T001 | Synthetic fixture tests; malformed XML, unsupported schema and digest conflict handling. |
-| T003 | Implement cancellable loose-file scan, streaming hashes and deterministic match model | not_started | T001, T002 | Known/unknown/ambiguous/flagged results; no collection mutations. |
-| T004 | Persist catalog and collection; expose read-only verification in minimalist Rust GUI | not_started | T003 | End-to-end scan and browse; responsive cancellation and details; performance baseline. |
+| T001 | Pin Rust toolchain and GUI toolkit, target Windows versions and code license; scaffold Cargo build and CI | in_progress | None | Rust 1.99.0, native egui prototype, workspace/lockfile, build instructions, architecture/dependency records and Windows/Linux CI added. Local Linux build passes. Remaining: Windows toolkit evaluation, actual supported-version decision, owner code license and reference GUI measurements. |
+| T002 | Implement safe local Logiqx XML DAT import and snapshot provenance | in_progress | T001 | Core importer and immutable SQLite snapshots implemented; bounded UTF-8 XML, inert external DOCTYPE, prohibited internal entities, invalid digest/schema and snapshot tests pass. Remains partial until foundation/Windows checks complete. |
+| T003 | Implement cancellable loose-file scan, streaming hashes and deterministic match model | in_progress | T001, T002 | Read-only recursive/excluded/cancelled scans; four streaming hashes; indexed matching; flags/conflicts/unsupported sets; changed-source/link tests and CLI workflow pass locally. Remaining: Windows reparse/filesystem validation, readable-error GUI review and hardening against parent-path swaps. |
+| T004 | Persist catalog and collection; expose read-only verification in minimalist Rust GUI | in_progress | T003 | Background DAT/scan/DB worker, bounded progress, SQLite completed-scan retention, visible rows/details/search/filter/sort/source selection and version. Remaining: native Windows end-to-end/latency tests, settings/preferences persistence, dialogs, structured metadata and expected-entry mismatch workflow. |
 | T005 | Implement streaming ZIP inspection and archive/member model | not_started | T003, T004 | Member hashes, errors and resource limits; no repacking. |
 | T006 | Implement organization planner and conflict preview | not_started | T004, T005 | Deterministic proposals, Windows edge cases, zero scan/preview mutations. |
 | T007 | Implement verified copy executor and durable journal | not_started | T006 | Copy, failure/cancellation and restart tests; originals preserved. |
@@ -252,8 +254,9 @@ Last updated: 2026-10-12.
 | T010 | Verify provider hosting/access policies and add opt-in catalog updates | deferred | T009 | Exact endpoints, license/access record, cache/backoff tests. |
 | T011 | Add disc sets, sidecars and additional format adapters | deferred | T009 | New scoped task design and format-specific acceptance criteria. |
 | T012 | Validate and package Linux desktop GUI | deferred | T009 | Named distributions; filesystem and GUI checks recorded. |
-| T013 | Establish representative performance fixtures, measurements and regression checks | not_started | T001, T004 | Recorded startup, input/query/frame latency, idle CPU, peak memory and job throughput; browsing under background load. |
+| T013 | Establish representative performance fixtures, measurements and regression checks | in_progress | T001, T004 | Synthetic release harness measures DAT/index/match, actual shared view query/sort, SQLite save/load and in-memory hash throughput. Initial Linux numbers recorded. Remaining: named Windows hardware, startup/input/frame/idle/memory/disk metrics and background-load browsing/cancellation. |
 | T014 | Refine and review minimalist, sleek GUI and accessibility | not_started | T004 | Consistent visual style; usable keyboard navigation, scaling, resize behavior and empty/error/loading states. |
+| T015 | Establish Skyline product name, shared version and release increment rules | done | Owner instruction | Root workspace 0.0.1 inherited by crates; header/About/title/CLI expose VERSION; CLI version tested; CI consistency check and docs/versioning.md. No release/tag published. |
 
 ### Decision record
 
@@ -267,7 +270,10 @@ Last updated: 2026-10-12.
 | D006 | Loose cartridges and ZIP before disc/arcade reconstruction | Recommended default | Prove matching and preservation before dependent multi-file formats. |
 | D007 | Performance and a snappy, responsive UI | Owner requirement | Measure user-visible latency and resource use; keep the GUI usable during background work. |
 | D008 | Minimalist, sleek, lightweight and functional visual design | Owner requirement | Favor clear information and restrained polish while preserving usability and accessibility. |
-| D009 | SQLite local persistence through Rust | Proposed | Retains a local database design; review dependency and integration tradeoffs during M0. |
+| D009 | SQLite local persistence through Rust | Superseded by D012 | Original proposal; concrete rusqlite/bundled SQLite integration now implemented and recorded in D012. |
+| D010 | Skyline name and incrementing release versions, visible in UI | Owner requirement (2026-10-12) | workspace.package.version is authoritative; initial source 0.0.1; every published testing/general release gets a new version. |
+| D011 | Rust 1.99.0, egui/eframe 0.33.3 native prototype, two crates | Implemented technical default; GUI provisional | Pin builds, retain portable core, virtualize visible rows, no browser runtime. Windows evaluation and GUI/resource measurements remain open; rationale in docs/architecture.md. |
+| D012 | Implement D009 with rusqlite/bundled SQLite | Implemented technical default; supersedes proposed storage state | Transactions and immutable snapshots; native C boundary isolated in store.rs. Dependency declarations/inventory in docs/dependencies.md. Application license remains pending. |
 
 ### Dated work history
 
@@ -277,8 +283,9 @@ Append entries here after substantive work. Preserve prior entries and identify 
 | --- | --- | --- | --- | --- |
 | 2026-10-12 | DOC-001 | done | Initial goals, source review, verification and file-operation rules, roadmap and agent workflow documented in AGENTS.md. | Application implementation and validation not started. |
 | 2026-10-12 | DOC-002 | done | Updated AGENTS.md to require Rust wherever feasible, make performance and minimalist GUI major goals, add proposed measurable targets, revise roadmap/decisions, and require goals/progress/history updates after each task. | Select Rust toolkit/toolchain, implement application, and measure behavior; documentation changes provide no runtime validation. |
+| 2026-10-12 | T001–T004, T013, T015 | in_progress; T015 done | First Rust read-only source slice: core/CLI/native desktop, immutable DAT snapshots, hashes/matching/scan/storage, version UI/policy, CI and dependency/architecture/performance records. Local workspace build and 20 network-free tests pass; synthetic core measurements recorded. Pending commit on feat/skyline-read-only-foundation. | M0/M1 incomplete: Windows GUI/CI evidence, license/platform choices, settings/dialogs and full performance/accessibility checks. ZIP and all file mutations await later milestones. |
 
-### Latest handoff
+### Previous handoff — DOC-002 (preserved)
 
 - Task: DOC-002.
 - Delivered: Rust as an owner requirement; explicit performance/resource and minimalist GUI goals; proposed responsiveness targets; updated architecture, milestones, tasks and decisions; mandatory maintenance of goals, current status, remaining work and dated history.
@@ -289,4 +296,15 @@ Append entries here after substantive work. Preserve prior entries and identify 
 - Blockers: none for local read-only development. Provider access questions block automated integrations only.
 - Next action: start T001 with a Rust GUI prototype and measurement plan, record reasonable technical defaults, then build T002–T004 as a small read-only slice using synthetic fixtures. Language selection is already settled in favor of Rust.
 - Suggested next-agent prompt: `Read AGENTS.md, inspect this repository, and begin the next unblocked task. Follow the Rust, performance and minimalist GUI requirements. Implement a small complete slice, run relevant checks, and update the current goals, task ledger, state, dated work history and handoff before finishing.`
+
+### Latest handoff — 2026-10-12
+
+- Task: T001–T004 / T013 partial; T015 done. Owner: current Codex session; no parallel agents.
+- Delivered: Skyline 0.0.1 source foundation and first read-only verification slice; details in current state, README, CHANGELOG and docs/architecture.md.
+- Changed paths: Cargo.toml/Cargo.lock/rust-toolchain.toml/.gitignore; crates/skyline-core (models, DAT/hash/matching/scan/store/view, CLI, integration tests, baseline example); crates/skyline-desktop/src/main.rs and manifest; .github/workflows/ci.yml; README.md, CHANGELOG.md, docs/*, AGENTS.md.
+- Checks: workspace check/build pass locally; 20 tests pass, including CLI import/scan/version; direct rustfmt check passes. Clippy via the direct driver with -D warnings passes for all workspace targets; standard remote CI is pending. Platform: restricted Ubuntu 24.04.3 x86_64, Rust 1.99.0; local explicit sysroot/BFD/TMPDIR/low-parallelism workarounds recorded in docs/performance.md. Initial failures from absent /proc, unwritable /tmp and incremental object generation were environmental; core tests pass with writable temp paths and nonincremental builds. No native GUI runtime/platform support claim.
+- Performance: release harness with 10k/100k mixed synthetic rows; actual shared query/sort p95 1.00/21.38 ms; DAT parse 11.08/116.82 ms; all conditions and missing GUI/resource measurements recorded in docs/performance.md. No prior application baseline existed.
+- References: pending commit; branch feat/skyline-read-only-foundation; PR pending. No release/tag or distributable build published.
+- Open work: Windows checks/native GUI evaluation; named reference hardware; persisted UI settings/preferences, native dialogs, structured metadata and selected-expectation mismatches; code license. Filesystem executor, ZIP and recovery are not implemented. Current scanner assumes a stable parent directory tree; final-component no-follow and changed-source checks exist, but hardened parent traversal remains open.
+- Next action: validate this slice on Windows with synthetic inputs; record actual toolkit/accessibility/scaling/latency results and finish T001/T004/T013 criteria, then advance to T005. Do not begin mutating real collections before planner/journal/executor milestones.
 
