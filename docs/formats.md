@@ -66,3 +66,8 @@ raw representation differences and blocked containers. They establish byte-compa
 behavior, not compatibility with every real-world dump or native Windows GUI usability.
 No commercial ROMs or third-party DAT bundles are committed. Provider downloads remain
 manual and offline verification makes no network requests.
+
+Validation: [source 62ea323](https://github.com/esotericode/Skyline/commit/62ea32341ac7a138e2745d6ea7b901ab1563f9f9)
+and [CI run 38307149725](https://github.com/esotericode/Skyline/actions/runs/38307149725):
+44 tests on Windows and Linux, formatting, Clippy with warnings denied, locked optimized
+desktop/CLI builds and shared-version checks. The change is in [draft PR #3](https://github.com/esotericode/Skyline/pull/3).
