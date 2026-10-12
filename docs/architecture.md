@@ -46,10 +46,12 @@ raw region/revision/language text; structured metadata extraction is pending.
 
 Recursive scans stream common loose cartridge representations and extensions declared
 by active DAT entries through CRC32/MD5/SHA-1/SHA-256 in one pass. A policy derived
-once per index enables custom/extensionless files without a system-specific code
-change. Known archives/disc containers/packages cannot opt into loose checks through
+once per index enables custom extensions, and extensionless files of catalog sizes,
+without a system-specific code change. Known archives/disc containers/packages cannot opt into loose checks through
 a DAT. Matching also refuses to verify a container entry by whole-file hashes.
-No header/byte-order transformation or source writes occur. See docs/formats.md.
+Recognized copier/emulator headers get a second, header-free digest set in the same
+read, compared only when the whole file has no candidate; no byte-order conversion
+or source writes occur. See docs/formats.md.
 Relative-prefix exclusions and cancellation are supported. Symlinks and junctions
 are skipped (other Windows reparse points such as OneDrive placeholders are hashed); recursion is capped at 128, records at 100,000. Size/mtime changes and
 Unix file identity are checked. The prototype assumes a stable directory tree;

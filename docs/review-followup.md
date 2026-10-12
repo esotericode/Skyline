@@ -63,3 +63,36 @@ Notes recorded for later (owner asked to note, not fix, for now):
    separate settings writer that never disables user actions.
 3. **Native pickers are not interactively tested.** Dialog open/cancel/quit-while-open
    on Windows and on Linux xdg-portal still need a hands-on smoke test.
+
+## Third review — multi-system follow-up (2026-10-12)
+
+Reviewed 62ea323..e811730. Checks passed before changes (44 tests, fmt, Clippy,
+release build; CI green). Scenario tests with the CLI found:
+
+- **Fixed — stale import override after upgrade.** Preferences saved by the PR #2
+  build store `"system":"Game Boy"` (the old required label). The new build treated it
+  as an override, so every later import was silently labelled Game Boy. Settings now
+  carry a revision; revision 0 clears `system` on load. Deliberate overrides persist.
+- **Fixed — extensionless files.** One extensionless DAT entry made every extensionless
+  file hashable (LICENSE, Makefile, .DS_Store, .git/HEAD were read). Now only files
+  whose size matches an extensionless entry are read (any size if such an entry has
+  no size).
+- **Fixed at the owner's request — headered dumps.** A headered `.nes` file was Unknown
+  against a headerless DAT with a generic message. Recognized headers (iNES, A78, LNX,
+  SNES copier) now get header-free digests in the same read; they are compared only
+  when the whole file has no candidate, and the result says so. See docs/formats.md.
+
+Recorded for later (owner asked to note, not fix):
+
+1. **Label differences split identities.** Matching treats (system label, game,
+   filename) as identity. The same DAT, or two versions of it, imported under different
+   labels (e.g. legacy "Game Boy" vs automatic "Nintendo - Game Boy") makes every match
+   Ambiguous: 19 of 26 rows in the fixture. There is no in-app catalog removal or
+   relabel; selecting a single catalog per scan is the only workaround. Needs an owner
+   decision: catalog remove/relabel, and/or treating same-game candidates whose only
+   difference is the label as one identity.
+2. **Two controls for one value.** The import system override has a text box and a
+   "Choose a system…" dropdown whose label never reflects the current override.
+3. **N64 byte order.** `.v64` (16-bit swapped) and `.n64` (little-endian) files are
+   accepted but not converted, so they are Unknown against big-endian `.z64` catalogs.
+   The header mechanism does not cover this; it needs a streaming byte-order adapter.

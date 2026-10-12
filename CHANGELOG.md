@@ -24,6 +24,10 @@
   links; the collection is a sortable, status-colored table with keyboard navigation
   and responsive columns; readable sizes, dates and Windows paths in details.
 - Commit-labelled Windows/Linux development builds from CI on `main`.
+- Headered NES/Atari 7800/Lynx/SNES copier dumps match headerless catalogs: the
+  header is excluded for a second comparison only; files are never changed.
+- Preferences saved before the system-label change no longer pre-fill "Game Boy" as
+  an import override; extensionless files are read only at catalog entry sizes.
 - Wayland sessions are supported natively; a failed start shows an error dialog on
   Windows instead of exiting silently.
 

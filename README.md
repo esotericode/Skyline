@@ -54,9 +54,10 @@ Windows SmartScreen may warn before the first launch. Windows: extract and run
 All scans reread bytes and preserve originals. Unknown does not mean corrupt;
 CRC-only has reduced confidence; matching a bad dump preserves its flag. Shared bytes
 across system identities remain Ambiguous. ZIP, dedicated containers and unsupported
-sets are visibly Unsupported. Byte-order/header changes are never applied silently;
-the file must match the catalog's exact byte representation. File organization and
-mutations are deferred.
+sets are visibly Unsupported. Recognized NES/Atari 7800/Lynx/SNES copier headers are
+excluded for a second comparison when the whole file has no match, and the details
+say so; the file is never changed. Byte order (N64 .v64/.n64) is not converted. File
+organization and mutations are deferred.
 
 Catalogs, exact snapshots and the last completed scan persist in
 `%LOCALAPPDATA%\Skyline` on Windows; Linux development uses `$XDG_DATA_HOME/Skyline`

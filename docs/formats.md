@@ -15,8 +15,9 @@ multiple systems. Matching rows show their system, search includes system names,
 the saved system filter narrows browsing without resolving ambiguous identities.
 
 Common loose extensions can be fingerprinted without a DAT (then unmatched bytes
-are Unknown). An active DAT can additionally enable other loose extensions, including
-extensionless entries. Known archives/disc containers/packages remain Unsupported
+are Unknown). An active DAT can additionally enable other loose extensions. Extensionless entries
+enable only extensionless files of a matching size (or any size when such an entry
+has none), so LICENSE/Makefile/.git files are not read. Known archives/disc containers/packages remain Unsupported
 even when listed in a DAT: their contents require dedicated adapters.
 
 | Loose representation family | Common extensions checked |
@@ -36,12 +37,26 @@ even when listed in a DAT: their contents require dedicated adapters.
 | MSX / generic loose bytes | `.rom`, `.bin` |
 | Other cataloged loose representations | Extensions declared by active DAT entries |
 
-These are **raw whole-file checks**, not format decoders or hardware validation.
-Headered/headerless NES/SNES/Atari files, N64 byte orders, or interleaved Sega files
-must match the exact representation in the selected catalog. Skyline performs no
-stripping, swapping, decryption, padding removal, repair or other byte transformation.
-If a different representation has no exact reference, its result is Unknown, not a
-claim of corruption. Every supplied supported digest and expected size is checked.
+These are whole-file checks, not format decoders or hardware validation, with one
+read-only addition for copier/emulator headers. Reference sets such as No-Intro list
+cartridge content without these headers, while most dumps carry them:
+
+| Header | Recognized by | Excluded bytes |
+| --- | --- | --- |
+| iNES / NES 2.0 | `NES\x1A` at offset 0 | 16 |
+| Atari 7800 (A78) | `ATARI7800` at offset 1 | 128 |
+| Atari Lynx (LNX) | `LYNX\0` at offset 0 | 64 |
+| SNES copier | `.smc/.sfc/.swc/.fig` whose size is a 1 KiB multiple plus 512 | 512 |
+
+The same single read produces whole-file digests and, when a header is recognized,
+digests of the bytes after it. Whole-file matches take precedence, so catalogs that
+list headered files behave as before. Only when the whole file has no candidate is
+the header-free content compared; a match then says which header was excluded, and
+the details show both digest sets. The file on disk is never changed. DAT entries
+with a `header` attribute stay Unsupported, and N64 byte orders (.v64/.n64),
+interleaved Sega files, decryption and padding removal are not handled: such files
+must match the catalog's exact bytes, or they are Unknown, not a claim of corruption.
+Every supplied supported digest and expected size is checked.
 
 One byte fingerprint can have multiple system/release identities. Those remain
 Ambiguous with all candidates visible, including when a system filter is active.
