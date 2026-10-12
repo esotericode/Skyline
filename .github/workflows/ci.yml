@@ -31,7 +31,7 @@ jobs:
         run: |
           version=$(cargo metadata --locked --no-deps --format-version 1 | python -c 'import json,sys; p=json.load(sys.stdin)["packages"]; v={x["version"] for x in p}; assert len(v)==1; print(v.pop())')
           test "$(target/release/skyline-cli --version)" = "Skyline $version"
-      # Development builds from main: commit-labelled CI artifacts, not versioned releases.
+      # Development testing artifacts use a fresh shared version for each new distribution.
       - name: Package development build
         id: package
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

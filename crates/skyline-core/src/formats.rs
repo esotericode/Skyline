@@ -36,9 +36,9 @@ pub const SYSTEM_PRESETS: &[&str] = &[
 /// Common loose representations can be fingerprinted even without an imported
 /// catalog. Extensions only decide what to read; identity comes from byte evidence.
 pub const LOOSE_EXTENSIONS: &[&str] = &[
-    "gb", "gbc", "gba", "nes", "sfc", "smc", "n64", "z64", "v64", "nds", "vb", "md", "gen", "smd",
-    "sms", "gg", "sg", "pce", "sgx", "a26", "a52", "a78", "j64", "jag", "lnx", "ngp", "ngc", "ws",
-    "wsc", "col", "cv", "vec", "sv", "rom", "bin",
+    "gb", "gbc", "gba", "nes", "sfc", "smc", "swc", "fig", "n64", "z64", "v64", "nds", "vb", "md",
+    "gen", "smd", "sms", "gg", "sg", "pce", "sgx", "a26", "a52", "a78", "j64", "jag", "lnx", "ngp",
+    "ngc", "ws", "wsc", "col", "cv", "vec", "sv", "rom", "bin",
 ];
 
 fn extension(path: &Path) -> Cow<'_, str> {

@@ -29,7 +29,9 @@ Every push to `main` that passes CI uploads Windows x64 and Linux x64 builds as
 artifacts on that [Actions run](https://github.com/esotericode/Skyline/actions/workflows/ci.yml)
 (signed-in GitHub users; kept 30 days). They are named
 `Skyline-v<version>-dev.<commit>-<platform>`, include `BUILD-INFO.txt` and
-`SHA256SUMS.txt`, and are development snapshots, not releases. Builds are unsigned, so
+`SHA256SUMS.txt`, and are development testing snapshots. Each different distributed
+testing build advances the shared version visible in the UI; commit labels identify
+the source, and no tagged GitHub Release is created. Builds are unsigned, so
 Windows SmartScreen may warn before the first launch. Windows: extract and run
 `Skyline.exe` (needs OpenGL 2 or newer). Linux: extract the `.tar.gz` and run `Skyline`
 (X11 or Wayland, OpenGL and libxkbcommon). Package locally after a release build with

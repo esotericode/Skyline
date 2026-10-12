@@ -21,8 +21,12 @@ This change establishes source version 0.0.1 without creating a release, tag,
 installer or testing distribution. Routine CI checks source commits and does not
 publish distinct releases. Do not claim a checklist passed because a build compiled.
 
-Development builds: CI on `main` (or a manual run) packages the checked release
-binaries as Actions artifacts named `Skyline-vX.Y.Z-dev.<commit>-<platform>` with
-build info and checksums. The commit label keeps each binary distinct, so these do
-not reuse a release version. They are not releases: no tag, GitHub Release or
-installer is created, and the release checklist above still applies before one is.
+Development testing builds: CI on `main` (or a manual run) packages checked binaries
+as Actions artifacts named `Skyline-vX.Y.Z-dev.<commit>-<platform>` with build info
+and checksums. The commit identifies the source; it does not replace the owner's
+incrementing version requirement. Before distributing a different testing build,
+bump the shared workspace version to the next unused value and refresh Cargo.lock;
+the UI and CLI must show that new version. The initial distribution uses 0.0.1.
+Documentation-only commits can retain the version when they publish no new binaries.
+An artifact need not have a tag, GitHub Release or installer to count as a testing
+distribution. A tagged/general release still follows the release checklist above.

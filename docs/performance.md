@@ -122,3 +122,22 @@ release baseline and do not satisfy a release or GUI latency budget.
 The harness still measures filename queries and sort with no active system filter.
 Matched-system filtering/search at representative catalog mixes, native GUI rendering,
 startup/idle CPU/memory, disk scanning and interactive Windows behavior remain unmeasured.
+
+## Review validation before main promotion — 2026-10-12
+
+Rebuilt the optimized core/example after reviewing 647ba9f and adding the two SNES
+aliases. Same unchanged 10k/100k synthetic harness, locked Rust 1.99.0 dependencies,
+thin LTO/BFD, two build workers and restricted Linux environment. The run overlapped
+local lint; the preceding T016 comparison had different load, so this is a single
+observation, not a controlled regression finding or a Windows/GUI acceptance result.
+
+| Entries | DAT parse (ms) | Index build (ms) | Match p95 (µs) | Query/sort p95 (ms) | Save/load (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 12.23 | 3.53 | 0.50 | 1.73 | 43.29 / 33.60 |
+| 100,000 | 104.06 | 33.98 | 0.57 | 21.65 | 469.99 / 373.04 |
+
+The previous T016 100k query/index observation was 21.79/31.41 ms; this run changes
+those by -0.14/+2.57 ms. Whole-file in-memory four-hash throughput was 314.04 MiB/s
+(previously 298.67). The benchmark does not enable header detection. Headered files
+compute an additional four content hashes in the same I/O pass; their CPU/disk/GUI
+cost and the SNES detection heuristic still need representative measurements.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Packages the locked release build in target/release as a development build.
-# Development builds are labelled with the commit and are not versioned releases
+# Testing builds use the shared version and a source commit label
 # (see docs/versioning.md). Usage: scripts/package-dev-build.sh <windows-x64|linux-x64> [out-dir]
 set -euo pipefail
 
@@ -33,7 +33,7 @@ cp docs/dependencies.md "$stage/THIRD-PARTY-DEPENDENCIES.md"
 cp docs/dependency-inventory.tsv "$stage/"
 cat > "$stage/BUILD-INFO.txt" <<EOF
 Skyline development build
-Version: $version (unreleased source version; this is not a published release)
+Version: $version (development testing build; no tagged GitHub Release)
 Commit: $commit
 Platform: $platform
 Built: $(date -u +"%Y-%m-%d %H:%M UTC")

@@ -52,6 +52,8 @@ fn mixed_cartridge_systems_match_all_digests_without_filename_inference_or_write
         ("NES", "nes"),
         ("SNES", "sfc"),
         ("SNES", "smc"),
+        ("SNES", "swc"),
+        ("SNES", "fig"),
         ("Nintendo 64", "n64"),
         ("Nintendo 64", "z64"),
         ("Nintendo 64", "v64"),
@@ -400,12 +402,58 @@ fn recognized_headers_are_excluded_for_comparison_only() {
     );
     // SNES copier headers have no signature: only size (1 KiB multiple + 512) marks them.
     let snes: Vec<u8> = content[..32_768].to_vec();
-    assert_eq!(
-        headered_scan("Game.smc", &[0; 512], &snes, "Game.sfc")
-            .result
-            .status,
-        Verification::Exact
-    );
+    for extension in ["smc", "sfc", "swc", "fig"] {
+        assert_eq!(
+            headered_scan(&format!("Game.{extension}"), &[0; 512], &snes, "Game.sfc")
+                .result
+                .status,
+            Verification::Exact,
+            "headerless DAT must accept the supported SNES alias {extension}"
+        );
+    }
+}
+
+#[test]
+fn header_comparison_preserves_all_digests_across_short_reads_and_buffer_boundaries() {
+    use skyline_core::{formats::detect_header, hash::hash_stream_with_header};
+    use std::io::{self, Read};
+
+    struct ShortReads<'a>(&'a [u8]);
+    impl Read for ShortReads<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let count = self.0.len().min(buffer.len()).min(7);
+            buffer[..count].copy_from_slice(&self.0[..count]);
+            self.0 = &self.0[count..];
+            Ok(count)
+        }
+    }
+
+    let header = [b"NES\x1a".as_slice(), &[0; 12]].concat();
+    let content: Vec<u8> = (0..150_000_u32).map(|i| (i * 13) as u8).collect();
+    let bytes = [header, content.clone()].concat();
+    // Large reads cross the 64 KiB hashing boundary; short reads split the signature
+    // and header. Both must yield identical whole-file and content-only evidence.
+    for reader in [
+        Box::new(bytes.as_slice()) as Box<dyn Read + '_>,
+        Box::new(ShortReads(&bytes)),
+    ] {
+        let mut progress = vec![];
+        let hashed = hash_stream_with_header(
+            reader,
+            &Cancellation::default(),
+            |size| progress.push(size),
+            |prefix| detect_header(prefix, "nes", bytes.len() as u64),
+        )
+        .unwrap();
+        assert_eq!(hashed.size, bytes.len() as u64);
+        assert_eq!(hashed.digests, digests(&bytes));
+        let evidence = hashed.header.unwrap();
+        assert_eq!(evidence.header_bytes, 16);
+        assert_eq!(evidence.size, content.len() as u64);
+        assert_eq!(evidence.digests, digests(&content));
+        assert_eq!(progress.last(), Some(&hashed.size));
+        assert!(progress.windows(2).all(|pair| pair[0] < pair[1]));
+    }
 }
 
 #[test]

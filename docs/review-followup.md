@@ -96,3 +96,28 @@ Recorded for later (owner asked to note, not fix):
 3. **N64 byte order.** `.v64` (16-bit swapped) and `.n64` (little-endian) files are
    accepted but not converted, so they are Unknown against big-endian `.z64` catalogs.
    The header mechanism does not cover this; it needs a streaming byte-order adapter.
+
+## Fourth review and main promotion — 2026-10-12
+
+Reviewed f7267c9 and 647ba9f against e811730, including streaming hash boundaries,
+whole-file precedence, content-size/digest comparisons, historical record decoding,
+settings migration, extensionless policy and GUI evidence. Concur with the fixes:
+they retain whole-file fingerprints and source bytes, label header-excluded results,
+clear obsolete import defaults and avoid unrestricted extensionless reads.
+Existing Windows/Linux CI 38309523836 passes for 647ba9f (48 tests per platform,
+formatting, Clippy, optimized builds and version consistency).
+
+Two small follow-ups were necessary before promotion: `.swc`/`.fig` were recognized
+by the header detector but rejected by the scan policy, so they are now common SNES
+aliases; the details label now says digests were calculated instead of asserting
+that header-free content was compared when a whole-file match took precedence.
+The header fixture exercises all four SNES aliases, and a new test checks all four
+digests over 150 KiB with both large reads and seven-byte reads that split headers
+and cross the 64 KiB buffer boundary. All 49 local tests and format/lint checks pass.
+
+Size gating cannot categorically prevent reading LICENSE/Makefile/.git files:
+matching sizes or a size-unspecified DAT entry still enable those reads. The coverage
+guide now states that limit accurately. Prior notes about catalog relabel/removal,
+the override controls and N64 byte order remain open; no identity policy was changed.
+Promotion to main is explicitly authorized by the owner; it will preserve history
+with a fast-forward. Final main ref and CI/artifact results are recorded in AGENTS.md.

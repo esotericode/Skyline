@@ -664,7 +664,7 @@ impl Skyline {
                         ui.separator();
                         ui.strong("Content without header");
                         ui.label(format!(
-                            "{} detected ({} bytes). Compared {} after it; the file is unchanged.",
+                            "{} detected ({} bytes). Calculated digests for {} after it; the file is unchanged.",
                             header.format,
                             header.header_bytes,
                             format_size(header.size)

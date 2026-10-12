@@ -17,13 +17,14 @@ the saved system filter narrows browsing without resolving ambiguous identities.
 Common loose extensions can be fingerprinted without a DAT (then unmatched bytes
 are Unknown). An active DAT can additionally enable other loose extensions. Extensionless entries
 enable only extensionless files of a matching size (or any size when such an entry
-has none), so LICENSE/Makefile/.git files are not read. Known archives/disc containers/packages remain Unsupported
+has none). Unrelated extensionless files at other sizes are skipped; matching sizes
+and size-unspecified entries can still cause unrelated files to be read. Known archives/disc containers/packages remain Unsupported
 even when listed in a DAT: their contents require dedicated adapters.
 
 | Loose representation family | Common extensions checked |
 | --- | --- |
 | NES / Famicom | `.nes` |
-| Super Nintendo | `.sfc`, `.smc` |
+| Super Nintendo | `.sfc`, `.smc`, `.swc`, `.fig` |
 | Nintendo 64 byte layouts | `.n64`, `.z64`, `.v64` |
 | Game Boy / Color / Advance | `.gb`, `.gbc`, `.gba` |
 | Nintendo DS / Virtual Boy | `.nds`, `.vb` |
@@ -39,7 +40,7 @@ even when listed in a DAT: their contents require dedicated adapters.
 
 These are whole-file checks, not format decoders or hardware validation, with one
 read-only addition for copier/emulator headers. Reference sets such as No-Intro list
-cartridge content without these headers, while most dumps carry them:
+cartridge content without these headers; some loose dump formats carry them:
 
 | Header | Recognized by | Excluded bytes |
 | --- | --- | --- |
@@ -75,7 +76,7 @@ Multi-file sets and unsupported comparison requirements stay inspection-only.
 | Full arcade merged/split set rebuilding | Set/dependency adapter and operation planning required |
 | Copy/move/rename and recovery | Planner and journal milestones; current verification preserves originals |
 
-Tests use tiny synthetic bytes across all 35 common extension aliases, custom and
+Tests use tiny synthetic bytes across all 37 common extension aliases, custom and
 extensionless DAT entries, multiple catalog/system identities, CLI/database roundtrips,
 raw representation differences and blocked containers. They establish byte-comparison
 behavior, not compatibility with every real-world dump or native Windows GUI usability.
