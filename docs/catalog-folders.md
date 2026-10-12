@@ -96,7 +96,7 @@ New systems, variants and ordinary extensions require no application update. A n
 XML schema, compression method, content transformation or set relationship can
 still require a tested format adapter; metadata cannot implement a decoder.
 
-Windows folder keys normalize canonical verbatim prefixes (including UNC), preserving
-offline-cache lookup. The UI saves normalized source paths after intake while keeping
+Windows folder keys resolve existing parent aliases and normalize canonical verbatim
+prefixes (including UNC), preserving offline-cache lookup. The UI saves normalized source paths after intake while keeping
 any newer path edit. Non-UTF-8 child filenames become bounded display diagnostics;
 they cannot turn a skipped file into a report-serialization failure.

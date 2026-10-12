@@ -43,9 +43,28 @@ impl IntakeReport {
 
 /// Absolute keys remain available when a previously selected folder is offline.
 pub(crate) fn folder_key(path: &Path) -> Result<PathBuf> {
-    let resolved = std::fs::canonicalize(path).unwrap_or(std::path::absolute(path)?);
+    let absolute = std::path::absolute(path)?;
+    let mut ancestor = absolute.as_path();
+    let mut tail = vec![];
+    let resolved = loop {
+        if let Ok(mut resolved) = std::fs::canonicalize(ancestor) {
+            for part in tail.iter().rev() {
+                resolved.push(part);
+            }
+            break resolved;
+        }
+        let Some(name) = ancestor.file_name() else {
+            break absolute.clone();
+        };
+        tail.push(name.to_os_string());
+        let Some(parent) = ancestor.parent() else {
+            break absolute.clone();
+        };
+        ancestor = parent;
+    };
     // Windows canonical paths acquire a verbatim prefix; absolute offline paths
-    // do not. Use the same key both online and offline, including UNC shares.
+    // do not. Existing parents also resolve 8.3 aliases used by temporary paths.
+    // Use the same key both online and offline, including UNC shares.
     #[cfg(windows)]
     let resolved = PathBuf::from(crate::view::display_path(&resolved).into_owned());
     Ok(resolved)

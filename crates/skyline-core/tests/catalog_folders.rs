@@ -198,7 +198,13 @@ fn offline_source_keeps_saved_catalogs_and_manual_imports_do_not_override_folder
         .sync_catalog_folder(&dats, &Cancellation::default(), |_, _, _| {})
         .unwrap();
     assert_eq!(report.parsed, 1);
-    assert_eq!(store.active_catalogs(Some(&dats)).unwrap().len(), 1);
+    assert_eq!(
+        store.active_catalogs(Some(&dats)).unwrap().len(),
+        1,
+        "Indexed root: {}; requested root: {}",
+        report.folder.display(),
+        dats.display()
+    );
     assert_eq!(store.active_catalogs(None).unwrap().len(), 2);
     std::fs::rename(&dats, temp.path().join("offline")).unwrap();
     assert!(
