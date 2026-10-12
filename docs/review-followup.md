@@ -35,3 +35,31 @@ Final follow-up [CI run 38301720896](https://github.com/esotericode/Skyline/acti
 passes on Windows/Linux for source revision 13e19c2: 34 tests per platform, formatting,
 Clippy with warnings denied, optimized desktop/CLI builds and version consistency.
 Later commits update this validation record only.
+
+## Second review — T004 follow-up (2026-10-12)
+
+Reviewed 7bd74ba..ec72079 (store migration, settings, preferences flush, native pickers).
+Fresh local checks pass: format, 34 tests, Clippy -D warnings, locked release build and
+version output. End-to-end migration check: a database created by the original a14397c
+CLI (schema 1, stale parse) was opened by this build; entries with `serial` attributes
+moved from Unsupported to Exact (Exact 14 → 17), parser_revision became 1 and the
+original import time/provenance were retained. In the Linux GUI (GNOME Wayland), a
+search edit saved after the debounce and was restored on relaunch; the picker buttons
+match the sidebar style. No defects requiring changes were found.
+
+Notes recorded for later (owner asked to note, not fix, for now):
+
+1. **Refresh failure locks the database.** `refresh_catalog_caches` runs inside
+   `Store::open`; if any preserved snapshot fails to parse under a new parser revision,
+   every open fails and the app cannot load, import or scan. There is no in-app way to
+   remove a catalog. Not reachable today (revision 0 → 1 only relaxes parsing). Before
+   any revision that tightens parsing, keep the previous derived entries (or mark that
+   catalog stale/excluded) on failure instead of failing the open.
+2. **Preference saves share the single job slot.** `Job::SaveSettings` uses the same
+   receiver as import/scan, so while a debounced save runs the action buttons are
+   disabled and the spinner shows. Locally the save finished within one frame, so no
+   flicker was observed; on slower Windows storage (synchronous=FULL, WAL fsync,
+   antivirus) it may last several frames and drop a click on Scan/Import. Consider a
+   separate settings writer that never disables user actions.
+3. **Native pickers are not interactively tested.** Dialog open/cancel/quit-while-open
+   on Windows and on Linux xdg-portal still need a hands-on smoke test.
