@@ -53,3 +53,33 @@ commit, enabled features, concurrent workload and warm/cold state.
   16.7 ms frame budget at 60 Hz); explain any revision before changing requirements.
 
 No GUI performance target or Linux desktop support is claimed by this baseline.
+
+## T004 follow-up comparison — 2026-10-12
+
+Re-ran the unchanged release harness against reviewed commit fe1f58d (isolated
+worktree) and this follow-up. Same restricted Ubuntu/x86_64 environment, Rust 1.99.0,
+thin LTO, BFD, two build workers, same 80% exact/20% unknown fixture and 100 warm
+query/sort samples. The before run overlapped the desktop test build; the after run
+overlapped lint/metadata checks. These single-run observations have uncontrolled
+concurrent workload and do not establish GUI latency or a statistically significant
+regression. External dependency artifacts were shared for the after run; fixture
+construction and compilation are outside the measured intervals.
+
+| Version | Entries | DAT parse (ms) | Match p95 (µs) | Query/sort p95 (ms) | SQLite save/load (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Reviewed fe1f58d | 10,000 | 11.90 | 0.40 | 1.93 | 42.59 / 33.45 |
+| Follow-up | 10,000 | 11.52 | 0.45 | 2.36 | 46.41 / 37.92 |
+| Reviewed fe1f58d | 100,000 | 119.97 | 0.48 | 20.18 | 488.00 / 350.95 |
+| Follow-up | 100,000 | 111.25 | 0.45 | 17.04 | 488.72 / 370.78 |
+
+Four-hash in-memory throughput: 310.34 before / 303.11 MiB/s after. The 10k query
+observation increased by 0.43 ms (22%); 100k decreased by 3.14 ms (16%). Query logic
+is unchanged in this slice; the mixed change is consistent with run/workload variation,
+not enough evidence to attribute an effect to preferences. Controlled Windows repeats
+are still required. Settings debounce, legacy-cache startup refresh, native dialog
+opening/focus, parent-window close behavior, idle CPU and rendering costs are not
+measured by the core harness and remain open.
+
+A first after-run failed compiling bundled SQLite because its temporary assembly
+file was truncated in this environment. Reusing the same successfully built locked
+SQLite dependency from the before target allowed the full after harness to run.

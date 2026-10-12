@@ -1,7 +1,8 @@
 use crate::model::{FileRecord, Verification};
 use std::{borrow::Cow, cmp::Ordering, path::Path};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Sort {
     Name,
     Status,

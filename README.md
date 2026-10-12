@@ -22,10 +22,10 @@ cargo run --locked -p skyline-desktop
 
 ## Try it
 
-1. Select Game Boy or Game Boy Color in the sidebar, enter a local UTF-8 XML DAT
+1. Select Game Boy or Game Boy Color in the sidebar, browse to a local UTF-8 XML DAT
    path and click **Import catalog**. DATs are user-supplied; none are bundled.
 2. Select all catalogs or one snapshot for the next scan.
-3. Enter a ROM folder and optional relative exclusion prefixes (one per line), then
+3. Choose a ROM folder and optional relative exclusion prefixes (one per line), then
    click **Scan and verify**. Supported loose extensions: .gb, .gbc, .rom, .bin.
 4. Browse/search/filter while the worker runs. **Cancel job** or Escape cancels.
    Select a row for calculated/expected hashes, reference flags and source evidence.
@@ -39,7 +39,14 @@ Catalogs, exact snapshots and the last completed scan persist in
 `%LOCALAPPDATA%\Skyline` on Windows; Linux development uses `$XDG_DATA_HOME/Skyline`
 or `~/.local/share/Skyline`. Override with `SKYLINE_DATA_DIR`. Cancelled/failed scans
 retain saved data; partial cancelled rows are temporary. Evidence is historical:
-rescan after file/reference changes. UI settings persistence remains pending.
+rescan after file/reference changes. Paths, exclusions, source selection, search,
+filter and sorting preferences are saved locally after editing and restored at
+startup. Picking a path selects it; import and scan still require their buttons.
+Manual path entry remains available if a native picker is unavailable.
+
+Older databases upgrade automatically from their preserved DAT snapshots. Catalog
+provenance and historical scan results are retained; rescan to use refreshed catalog
+entries. There is no need to delete the database or import the same DAT again.
 
 ## Internal CLI
 

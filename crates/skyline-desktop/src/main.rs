@@ -1,5 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod preferences;
+
 use anyhow::{Context, Result};
 use eframe::egui::{self, Color32, RichText};
 use skyline_core::{
@@ -9,6 +11,7 @@ use skyline_core::{
     matching::CatalogIndex,
     model::{Catalog, FileRecord, Verification},
     scan::{ScanOptions, ScanProgress, scan_folder},
+    settings::{AppSettings, CatalogChoice},
     store::Store,
     view::{Sort, display_path, format_size, format_utc, query_rows},
 };
@@ -24,10 +27,26 @@ use std::{
 
 enum Event {
     Progress(ScanProgress),
-    Loaded(Vec<Catalog>, Vec<FileRecord>),
+    Loaded(Box<LoadedState>),
     Imported(Vec<Catalog>),
     Scanned(Vec<FileRecord>, String),
     Failed(String),
+    SettingsSaved(Box<AppSettings>),
+    SettingsFailed(String),
+    PathPicked(PathChoice, Option<PathBuf>),
+}
+
+struct LoadedState {
+    catalogs: Vec<Catalog>,
+    records: Vec<FileRecord>,
+    settings: AppSettings,
+    settings_warning: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum PathChoice {
+    Dat,
+    Folder,
 }
 
 enum Job {
@@ -42,6 +61,11 @@ enum Job {
         catalogs: Arc<Vec<Catalog>>,
         selected: Option<usize>,
     },
+    SaveSettings(AppSettings),
+    PickPath {
+        kind: PathChoice,
+        dialog: rfd::FileDialog,
+    },
 }
 
 fn run_job(
@@ -51,12 +75,30 @@ fn run_job(
     sender: SyncSender<Event>,
     ctx: egui::Context,
 ) {
+    let settings_job = matches!(&job, Job::SaveSettings(_));
     let result = (|| -> Result<Event> {
         cancel.check()?;
-        let mut store = Store::open(&database)?;
         match job {
-            Job::Load => Ok(Event::Loaded(store.catalogs()?, store.collection()?)),
+            Job::Load => {
+                let store = Store::open_cancellable(&database, &cancel)?;
+                let (settings, settings_warning) = match store.settings() {
+                    Ok(settings) => (settings, None),
+                    Err(error) => (
+                        AppSettings::default(),
+                        Some(format!(
+                            "Saved preferences could not be restored; using defaults. {error:#}"
+                        )),
+                    ),
+                };
+                Ok(Event::Loaded(Box::new(LoadedState {
+                    catalogs: store.catalogs()?,
+                    records: store.collection()?,
+                    settings,
+                    settings_warning,
+                })))
+            }
             Job::Import { path, system } => {
+                let mut store = Store::open_cancellable(&database, &cancel)?;
                 let imported = import_path(&path, &system, &cancel)?;
                 cancel.check()?;
                 store.import_catalog(&imported)?;
@@ -68,6 +110,7 @@ fn run_job(
                 catalogs,
                 selected,
             } => {
+                let mut store = Store::open_cancellable(&database, &cancel)?;
                 let catalogs = if let Some(id) = selected {
                     vec![catalogs[id].clone()]
                 } else {
@@ -105,9 +148,29 @@ fn run_job(
                 };
                 Ok(Event::Scanned(report.records, status))
             }
+            Job::SaveSettings(settings) => {
+                Store::open_cancellable(&database, &cancel)?.save_settings(&settings)?;
+                Ok(Event::SettingsSaved(Box::new(settings)))
+            }
+            Job::PickPath { kind, dialog } => {
+                let path = match kind {
+                    PathChoice::Dat => dialog.pick_file(),
+                    PathChoice::Folder => dialog.pick_folder(),
+                };
+                Ok(Event::PathPicked(
+                    kind,
+                    if cancel.is_cancelled() { None } else { path },
+                ))
+            }
         }
     })();
-    let event = result.unwrap_or_else(|error| Event::Failed(format!("{error:#}")));
+    let event = result.unwrap_or_else(|error| {
+        if settings_job {
+            Event::SettingsFailed(format!("{error:#}"))
+        } else {
+            Event::Failed(format!("{error:#}"))
+        }
+    });
     let _ = sender.send(event);
     ctx.request_repaint();
 }
@@ -137,6 +200,15 @@ struct Skyline {
     scroll_offset: f32,
     viewport_height: f32,
     scroll_request: Option<f32>,
+    settings_loaded: bool,
+    last_saved_settings: AppSettings,
+    tracked_settings: AppSettings,
+    settings_change_at: Option<Instant>,
+    settings_save_failed: bool,
+    picker_open: bool,
+    worker: Option<std::thread::JoinHandle<()>>,
+    saving_preferences: bool,
+    quit_after_picker: bool,
 }
 
 impl Skyline {
@@ -171,6 +243,15 @@ impl Skyline {
             scroll_offset: 0.0,
             viewport_height: 0.0,
             scroll_request: None,
+            settings_loaded: false,
+            last_saved_settings: AppSettings::default(),
+            tracked_settings: AppSettings::default(),
+            settings_change_at: None,
+            settings_save_failed: false,
+            picker_open: false,
+            worker: None,
+            saving_preferences: false,
+            quit_after_picker: false,
         };
         app.start(Job::Load, &cc.egui_ctx);
         app
@@ -183,9 +264,20 @@ impl Skyline {
         let (sender, receiver) = mpsc::sync_channel(16);
         self.cancel = Cancellation::default();
         self.receiver = Some(receiver);
-        self.error = None;
+        let quiet = matches!(&job, Job::SaveSettings(_));
+        self.saving_preferences = quiet;
+        self.picker_open = matches!(&job, Job::PickPath { .. });
+        if !quiet {
+            self.error = None;
+        }
         self.progress = None;
-        self.status = "Working…".into();
+        if !quiet {
+            self.status = if self.picker_open {
+                "Choose a path in the dialog, or cancel there.".into()
+            } else {
+                "Working…".into()
+            };
+        }
         let database = self.database.clone();
         let cancel = self.cancel.clone();
         let ctx = ctx.clone();
@@ -193,14 +285,20 @@ impl Skyline {
         let fallback_ctx = ctx.clone();
         let result = std::thread::Builder::new().name("skyline-job".into()).spawn(move || {
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_job(job, database, cancel, sender, ctx))).is_err() {
-                let _ = fallback_sender.send(Event::Failed("Background worker failed unexpectedly. Reopen or rescan to refresh saved state.".into()));
+                let message = "Background worker failed unexpectedly. Reopen or rescan to refresh saved state.".into();
+                let _ = fallback_sender.send(if quiet { Event::SettingsFailed(message) } else { Event::Failed(message) });
                 fallback_ctx.request_repaint();
             }
         });
         if let Err(error) = result {
             self.error = Some(format!("Could not start background job: {error}"));
             self.status = "Job could not start".into();
+            if quiet {
+                self.settings_save_failed = true;
+            }
             self.finish();
+        } else {
+            self.worker = result.ok();
         }
     }
 
@@ -213,17 +311,24 @@ impl Skyline {
         for event in events {
             match event {
                 Event::Progress(progress) => self.progress = Some(progress),
-                Event::Loaded(catalogs, records) => {
-                    self.catalogs = Arc::new(catalogs);
-                    self.set_records(records);
+                Event::Loaded(state) => {
+                    self.catalogs = Arc::new(state.catalogs);
+                    self.apply_settings(&state.settings);
+                    self.last_saved_settings = state.settings;
+                    self.tracked_settings = self.current_settings();
+                    self.settings_loaded = true;
+                    self.error = state.settings_warning;
+                    self.set_records(state.records);
                     self.status =
                         "Ready · saved results are historical; rescan to refresh byte evidence"
                             .into();
                     self.finish();
                 }
                 Event::Imported(catalogs) => {
+                    let preferred = self.current_settings().preferred_catalog;
                     self.catalogs = Arc::new(catalogs);
-                    self.selected_catalog = None;
+                    self.selected_catalog =
+                        preferred.and_then(|choice| choice.resolve(&self.catalogs));
                     self.status = "Catalog imported · rescan to use updated references".into();
                     self.finish();
                 }
@@ -237,6 +342,36 @@ impl Skyline {
                     self.status = "Job stopped · previous saved data retained".into();
                     self.finish();
                 }
+                Event::SettingsSaved(settings) => {
+                    self.last_saved_settings = *settings;
+                    self.finish();
+                }
+                Event::SettingsFailed(error) => {
+                    self.error = Some(format!("Preferences could not be saved: {error}"));
+                    self.settings_save_failed = true;
+                    self.finish();
+                }
+                Event::PathPicked(kind, path) => {
+                    if let Some(path) = path {
+                        let text = path.into_os_string().into_string();
+                        match text {
+                            Ok(text) => {
+                                match kind {
+                                    PathChoice::Dat => self.dat_path = text,
+                                    PathChoice::Folder => self.root_path = text,
+                                }
+                                self.status = "Path selected · ready when you are".into();
+                            }
+                            Err(_) => {
+                                self.error = Some("This path cannot be represented as UTF-8; enter a supported path.".into());
+                                self.status = "Path selection stopped".into();
+                            }
+                        }
+                    } else {
+                        self.status = "Path selection cancelled".into();
+                    }
+                    self.finish();
+                }
             }
         }
     }
@@ -244,6 +379,96 @@ impl Skyline {
     fn finish(&mut self) {
         self.receiver = None;
         self.progress = None;
+        self.picker_open = false;
+        // Final events arrive only after the worker's database writes have finished.
+        self.worker = None;
+        self.saving_preferences = false;
+    }
+
+    fn current_settings(&self) -> AppSettings {
+        AppSettings {
+            dat_path: self.dat_path.clone(),
+            root_path: self.root_path.clone(),
+            exclusions: self.exclusions.clone(),
+            system: self.system.clone(),
+            preferred_catalog: self
+                .selected_catalog
+                .and_then(|id| self.catalogs.get(id))
+                .map(CatalogChoice::from_catalog),
+            search: self.search.clone(),
+            status_filter: self.status_filter.clone(),
+            sort: self.sort,
+            descending: self.descending,
+        }
+    }
+
+    fn apply_settings(&mut self, settings: &AppSettings) {
+        self.dat_path = settings.dat_path.clone();
+        self.root_path = settings.root_path.clone();
+        self.exclusions = settings.exclusions.clone();
+        self.system = settings.system.clone();
+        self.selected_catalog = settings
+            .preferred_catalog
+            .as_ref()
+            .and_then(|choice| choice.resolve(&self.catalogs));
+        self.search = settings.search.clone();
+        self.status_filter = settings.status_filter.clone();
+        self.sort = settings.sort;
+        self.descending = settings.descending;
+    }
+
+    fn save_preferences_when_idle(&mut self, ctx: &egui::Context) {
+        if !self.settings_loaded || self.quit_after_picker {
+            return;
+        }
+        let current = self.current_settings();
+        if current != self.tracked_settings {
+            self.tracked_settings = current.clone();
+            self.settings_change_at = Some(Instant::now());
+            self.settings_save_failed = false;
+        }
+        if current == self.last_saved_settings
+            || self.settings_save_failed
+            || self.receiver.is_some()
+        {
+            return;
+        }
+        let elapsed = self
+            .settings_change_at
+            .map_or(Duration::from_millis(500), |at| at.elapsed());
+        if elapsed >= Duration::from_millis(500) {
+            self.start(Job::SaveSettings(current), ctx);
+        } else {
+            ctx.request_repaint_after(Duration::from_millis(500) - elapsed);
+        }
+    }
+
+    fn pick_path(&mut self, kind: PathChoice, ctx: &egui::Context, frame: &eframe::Frame) {
+        let dialog = rfd::FileDialog::new().set_parent(frame);
+        let dialog = match kind {
+            PathChoice::Dat => {
+                let dialog = dialog
+                    .set_title("Choose a reference DAT")
+                    .add_filter("XML DAT catalogs", &["dat", "xml"]);
+                if let Some(parent) = PathBuf::from(&self.dat_path)
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                {
+                    dialog.set_directory(parent)
+                } else {
+                    dialog
+                }
+            }
+            PathChoice::Folder => {
+                let dialog = dialog.set_title("Choose a ROM folder");
+                if self.root_path.is_empty() {
+                    dialog
+                } else {
+                    dialog.set_directory(&self.root_path)
+                }
+            }
+        };
+        self.start(Job::PickPath { kind, dialog }, ctx);
     }
 
     fn set_records(&mut self, records: Vec<FileRecord>) {
@@ -269,7 +494,7 @@ impl Skyline {
         );
     }
 
-    fn controls(&mut self, ctx: &egui::Context) {
+    fn controls(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -289,7 +514,14 @@ impl Skyline {
                 if self.receiver.is_some() {
                     ui.spinner();
                 }
-                if self.receiver.is_some() && ui.button("Cancel job").clicked() {
+                if self.saving_preferences {
+                    ui.small("Saving preferences…");
+                }
+                if self.receiver.is_some()
+                    && !self.picker_open
+                    && !self.saving_preferences
+                    && ui.button("Cancel job").clicked()
+                {
                     self.cancel.cancel();
                     self.status = "Cancelling at the next safe boundary…".into();
                 }
@@ -329,6 +561,9 @@ impl Skyline {
                 });
                 ui.label("Local XML DAT file path");
                 ui.add(egui::TextEdit::singleline(&mut self.dat_path).hint_text("C:\\Catalogs\\reference.dat").desired_width(f32::INFINITY));
+                if ui.add_enabled(self.receiver.is_none(), egui::Button::new("Browse DAT…")).clicked() {
+                    self.pick_path(PathChoice::Dat, ctx, frame);
+                }
                 if ui.add_enabled(self.receiver.is_none() && !self.dat_path.trim().is_empty(), egui::Button::new("Import catalog")).clicked() {
                     self.start(Job::Import { path: self.dat_path.trim().into(), system: self.system.clone() }, ctx);
                 }
@@ -336,6 +571,9 @@ impl Skyline {
                 ui.heading("Scan folder");
                 ui.label("ROM folder path");
                 ui.add(egui::TextEdit::singleline(&mut self.root_path).hint_text("C:\\ROMs").desired_width(f32::INFINITY));
+                if ui.add_enabled(self.receiver.is_none(), egui::Button::new("Choose folder…")).clicked() {
+                    self.pick_path(PathChoice::Folder, ctx, frame);
+                }
                 ui.label("Exclude relative prefixes (one per line)");
                 ui.add(egui::TextEdit::multiline(&mut self.exclusions).desired_rows(2).desired_width(f32::INFINITY).hint_text("Backups\nUnsorted"));
                 if ui.add_enabled(self.receiver.is_none() && !self.root_path.trim().is_empty(), egui::Button::new("Scan and verify")).clicked() {
@@ -831,9 +1069,11 @@ fn paint_cell(
 }
 
 impl eframe::App for Skyline {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.poll();
         if self.receiver.is_some()
+            && !self.picker_open
+            && !self.saving_preferences
             && !ctx.wants_keyboard_input()
             && !ctx.is_popup_open()
             && ctx.input(|input| input.key_pressed(egui::Key::Escape))
@@ -842,8 +1082,18 @@ impl eframe::App for Skyline {
         }
         if ctx.input(|input| input.viewport().close_requested()) {
             self.cancel.cancel();
+            if self.picker_open {
+                // rfd keeps the parent's raw native handles. Keep the window alive
+                // until the dialog returns, then honor the user's quit request.
+                self.quit_after_picker = true;
+                self.status = "Close the file dialog to finish quitting Skyline.".into();
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
         }
-        self.controls(ctx);
+        if self.quit_after_picker && !self.picker_open {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        self.controls(ctx, frame);
         self.details(ctx);
         self.collection(ctx);
         egui::Window::new("About Skyline").open(&mut self.show_about).resizable(false).show(ctx, |ui| {
@@ -853,10 +1103,33 @@ impl eframe::App for Skyline {
             ui.label(format!("Local database: {}", self.database.display()));
             ui.label("Application license: pending owner selection.");
         });
+        self.save_preferences_when_idle(ctx);
         // eframe repaints on input and worker notifications. No continuous idle repaint loop.
     }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.cancel.cancel();
+        self.receiver = None;
+        // An older debounced save must finish before the final snapshot is written.
+        // Dropping the receiver above also unblocks its terminal event send.
+        if self.settings_loaded
+            && (self.saving_preferences || self.current_settings() != self.last_saved_settings)
+        {
+            let settings = self.current_settings();
+            let database = self.database.clone();
+            // Rendering is finished. Flush the last edit on a worker, including edits
+            // made during a job or inside the debounce window, then wait for its receipt.
+            let pending = if self.saving_preferences {
+                self.worker.take()
+            } else {
+                None
+            };
+            let result = preferences::flush(database, settings, pending);
+            if let Err(error) = result {
+                report_error(&format!(
+                    "Skyline could not save your latest preferences.\n\n{error:#}"
+                ));
+            }
+        }
     }
 }
 
@@ -887,20 +1160,20 @@ fn main() {
         return;
     }
     if let Err(error) = run() {
-        report_startup_error(&format!("{error:#}"));
+        report_error(&format!("Skyline could not start.\n\n{error:#}"));
         std::process::exit(1);
     }
 }
 
 /// Release builds on Windows have no console, so stderr alone would make a failed start
 /// (for example, no usable OpenGL driver) look like the app never launched.
-fn report_startup_error(message: &str) {
-    eprintln!("Skyline could not start: {message}");
+fn report_error(message: &str) {
+    eprintln!("{message}");
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
         let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
-        let text = wide(&format!("Skyline could not start.\n\n{message}"));
+        let text = wide(message);
         let title = wide("Skyline");
         // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call.
         unsafe {

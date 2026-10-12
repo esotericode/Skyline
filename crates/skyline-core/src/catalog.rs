@@ -14,6 +14,8 @@ use std::{
 
 pub const MAX_DAT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 1_000_000;
+/// Increment whenever parsing semantics change so saved derived entries are refreshed.
+pub const PARSER_REVISION: i64 = 1;
 const MAX_TEXT: usize = 8192;
 /// Known Logiqx/No-Intro/MAME ROM attributes that describe an entry without changing
 /// which bytes the digests cover. Real DATs carry these on ordinary single-file entries.

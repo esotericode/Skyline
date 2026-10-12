@@ -1,7 +1,7 @@
 # Dependency record
 
 Direct versions are exact pins in Cargo.toml; Cargo.lock pins all transitive
-versions. The [inventory](dependency-inventory.tsv) records 390 registry package
+versions. The [inventory](dependency-inventory.tsv) records 402 registry package
 versions and their declared SPDX license expressions/repositories from Cargo
 metadata on 2026-10-12, including optional/other-platform dependencies. This is an
 inventory, not a completed legal review or a binary-specific notices bundle.
@@ -18,6 +18,7 @@ inventory, not a completed legal review or a binary-specific notices bundle.
 | anyhow 1.0.100 | Contextual local errors | MIT OR Apache-2.0 |
 | libc 0.2.190 (Unix) | O_NOFOLLOW file-open constant | MIT OR Apache-2.0 |
 | windows-sys 0.61.2 (Windows) | Startup-failure message box (already in the graph via winit) | MIT OR Apache-2.0 |
+| rfd 0.15.4 | Native DAT/folder selection; Windows API and Linux XDG portal boundaries | MIT |
 | tempfile 3.23.0 (development only) | Disposable test/measurement directories | MIT OR Apache-2.0 |
 
 Source references: the versioned crates.io/Cargo metadata and upstream repository
@@ -29,7 +30,10 @@ URLs in the inventory; [egui](https://github.com/emilk/egui),
 Native boundaries: bundled SQLite is C; MSVC/Windows SDK and system graphics/
 windowing libraries support Windows; Linux uses X11 or Wayland (loaded at runtime)/XKB/OpenGL and platform
 accessibility libraries. Rust UI logic does not require a browser or scripting
-runtime. Rust/compiler tooling and OS libraries are build/runtime dependencies
+runtime. Native pickers use Windows dialogs and the Linux desktop portal through
+local D-Bus; manual path entry remains available. macOS picker behavior is outside
+the current validation targets. No application logic was moved out of Rust.
+Rust/compiler tooling and OS libraries are build/runtime dependencies
 distinct from application logic. AccessKit and default fonts require their own
 notices in a distribution; preserve upstream bundled font notices.
 

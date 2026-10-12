@@ -10,7 +10,7 @@ until the platform and performance evidence in AGENTS.md is recorded.
   presentation/background jobs. skyline-cli exercises the same services offline.
 - egui/eframe 0.33.3 is the initial native prototype (MIT OR Apache-2.0), using
   OpenGL/glow, bundled fonts and AccessKit. It renders visible rows and wakes on
-  input/worker notifications. It has a Linux/X11 path and no browser runtime.
+  input/worker notifications. It has Linux/X11 and Wayland paths and no browser runtime.
   This documented API pin is sufficient for the prototype; it is not the latest
   available release. Windows evaluation must confirm this provisional selection.
 - Alternatives: Iced's application/message structure adds setup to this small
@@ -57,9 +57,30 @@ scans retain saved data; partial rows are temporary. SQLite uses WAL/FULL synchr
 Results are historical evidence. Search/sort runs on bounded in-memory rows on the
 GUI thread; measure it and move/index/page it if the target is exceeded.
 
+Database schema 2 records a parser revision for each derived catalog cache and one
+bounded preferences row. Opening schema 1 acquires an immediate transaction, checks
+each preserved snapshot's SHA-256/size and reparses its entries, keeping original
+origin/provider/license/time. Snapshot bytes and saved scan evidence remain unchanged.
+Failures/cancellation roll back the entire migration. No original DAT file, network
+request or database deletion is needed. Increment PARSER_REVISION for future semantic
+parser changes; newer schemas/parser caches reject older readers.
+
+Preferences include paths, exclusions, import system, chosen source, query/filter and
+sort. Sources use SHA-256 plus system instead of unstable array indices. Changes save
+after a 500 ms idle debounce via the job worker. Jobs delay that save until idle; quit
+flushes the latest edit on a worker after an outstanding save finishes. Broken settings
+fall back visibly to defaults without replacing the stored payload on startup. Settings
+never authorize imports, scans or source mutations. JSON payloads are capped at 1 MiB.
+
+rfd 0.15.4 supplies native pickers, parented to the eframe window and invoked on a
+worker. Selection fills a path only; Import/Scan remain explicit. Cancelling preserves
+the old path. While a picker holds native parent handles, quitting is deferred until
+it returns, then the quit request is honored. Windows/Linux interactive dialog smoke
+tests and portal failure/focus behavior still need platform validation.
+
 ## Open work
 
-Native file dialogs, saved UI settings/catalog preferences, structured metadata,
-expected-entry selection, richer table columns, Windows GUI/accessibility/scaling
-validation and resource/latency baselines. ZIP, planning, copy/move, journals/history,
+Structured metadata, expected-entry selection, per-system preference profiles,
+Windows GUI/accessibility/scaling, interactive dialog validation and resource/latency
+baselines. ZIP, planning, copy/move, journals/history,
 recovery and undo are not implemented. Provider download adapters remain disabled.

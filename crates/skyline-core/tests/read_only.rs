@@ -586,3 +586,53 @@ fn display_helpers_are_human_readable() {
     assert_eq!(format_utc(951_782_400), "2000-02-29 00:00 UTC");
     assert_eq!(format_utc(1_791_820_799), "2026-10-12 15:59 UTC");
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_junctions_are_skipped_without_reading_targets() {
+    let selected = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    std::fs::write(target.path().join("synthetic.gb"), b"abc").unwrap();
+    let junction = selected.path().join("junction");
+    let created = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(target.path())
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(skyline_core::hash::is_link(
+        &std::fs::symlink_metadata(&junction).unwrap()
+    ));
+    let index = CatalogIndex::new(vec![]);
+    let report = scan_folder(
+        selected.path(),
+        &index,
+        &ScanOptions::default(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(report.records.len(), 1);
+    assert_eq!(report.hashed_bytes, 0);
+    assert_eq!(report.records[0].result.status, Verification::Unsupported);
+    assert!(
+        scan_folder(
+            &junction,
+            &index,
+            &ScanOptions::default(),
+            &Cancellation::default(),
+            |_| {}
+        )
+        .is_err()
+    );
+    std::fs::remove_dir(&junction).unwrap();
+    assert_eq!(
+        std::fs::read(target.path().join("synthetic.gb")).unwrap(),
+        b"abc"
+    );
+}
