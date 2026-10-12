@@ -515,3 +515,74 @@ fn cli_end_to_end_import_scan_and_version() {
         1
     );
 }
+
+#[test]
+fn descriptive_rom_attributes_do_not_block_verification() {
+    // No-Intro/Datoso DATs carry serial/mia metadata on ordinary single-file entries.
+    let result = identify(
+        "size=\"3\" sha1=\"a9993e364706816aba3e25717850c26c9cd0d89d\" status=\"verified\" serial=\"DMG-XYZ\" mia=\"no\"",
+    );
+    assert_eq!(result.status, Verification::Exact);
+    assert!(result.candidates[0].entry.unsupported_algorithms.is_empty());
+    // A copier header changes which bytes the digests describe; stay fail-closed.
+    let result = identify("size=\"3\" crc=\"352441c2\" header=\"4E 45 53 1A\"");
+    assert_eq!(result.status, Verification::Unsupported);
+}
+
+#[test]
+fn rejected_size_evidence_reads_as_plain_numbers() {
+    let result = identify("size=\"4\" crc=\"352441c2\"");
+    assert_eq!(
+        result.rejected[0].failures[0],
+        "Size: expected 4, calculated 3"
+    );
+}
+
+#[test]
+fn view_sorts_names_case_insensitively_and_status_by_strength() {
+    use skyline_core::view::{Sort, query_rows};
+    let row = |path: &str, result: MatchResult| FileRecord {
+        path: path.into(),
+        size: Some(3),
+        digests: Some(hashes()),
+        result,
+    };
+    let unknown = || CatalogIndex::new(vec![]).identify(3, &hashes());
+    let rows = vec![
+        row("b.gb", unknown()),
+        row("A.gb", unknown()),
+        row("c.gb", identify("crc=\"352441c2\"")),
+        row(
+            "d.gb",
+            identify("size=\"3\" sha1=\"a9993e364706816aba3e25717850c26c9cd0d89d\""),
+        ),
+    ];
+    assert_eq!(query_rows(&rows, "", None, Sort::Name, false), [1, 0, 2, 3]);
+    assert_eq!(
+        query_rows(&rows, "", None, Sort::Status, false),
+        [3, 2, 1, 0]
+    );
+}
+
+#[test]
+fn display_helpers_are_human_readable() {
+    use skyline_core::view::{display_path, format_size, format_utc};
+    assert_eq!(
+        display_path(Path::new(r"\\?\C:\ROMs\a.gb")),
+        r"C:\ROMs\a.gb"
+    );
+    assert_eq!(
+        display_path(Path::new(r"\\?\UNC\nas\share\a.gb")),
+        r"\\nas\share\a.gb"
+    );
+    assert_eq!(
+        display_path(Path::new("/home/roms/a.gb")),
+        "/home/roms/a.gb"
+    );
+    assert_eq!(format_size(512), "512 B");
+    assert_eq!(format_size(65_536), "64.0 KiB");
+    assert_eq!(format_size(1_048_576), "1.0 MiB");
+    assert_eq!(format_utc(0), "1970-01-01 00:00 UTC");
+    assert_eq!(format_utc(951_782_400), "2000-02-29 00:00 UTC");
+    assert_eq!(format_utc(1_791_820_799), "2026-10-12 15:59 UTC");
+}

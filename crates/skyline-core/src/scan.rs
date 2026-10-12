@@ -66,15 +66,17 @@ pub fn scan_folder(
     }
     let root = root.canonicalize()?;
     // Keep only one read_dir iterator per recursion level; do not collect a huge directory.
-    let mut directories = vec![fs::read_dir(&root).context("Reading selected folder")?];
+    let mut directories = vec![(
+        root.clone(),
+        fs::read_dir(&root).context("Reading selected folder")?,
+    )];
     let mut records = Vec::new();
     let mut hashed_bytes = 0;
-    while !directories.is_empty() {
+    while let Some((directory, entries)) = directories.last_mut() {
         if cancel.is_cancelled() {
             break;
         }
-        let next = directories.last_mut().expect("nonempty stack").next();
-        let Some(next) = next else {
+        let Some(next) = entries.next() else {
             directories.pop();
             continue;
         };
@@ -85,7 +87,7 @@ pub fn scan_folder(
             Ok(item) => item,
             Err(error) => {
                 records.push(issue(
-                    root.clone(),
+                    directory.clone(),
                     Verification::ReadError,
                     error.to_string(),
                 ));
@@ -126,7 +128,7 @@ pub fn scan_folder(
                 continue;
             }
             match fs::read_dir(&path) {
-                Ok(directory) => directories.push(directory),
+                Ok(entries) => directories.push((path, entries)),
                 Err(error) => records.push(issue(path, Verification::ReadError, error.to_string())),
             }
             continue;

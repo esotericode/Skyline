@@ -46,11 +46,8 @@ impl CatalogIndex {
             let entry = &catalog.entries[entry_id];
             let mut failures = Vec::new();
             let mut checked = Vec::new();
-            if entry.size.is_some_and(|expected| expected != size) {
-                failures.push(format!(
-                    "Size: expected {:?}, calculated {size}",
-                    entry.size
-                ));
+            if let Some(expected) = entry.size.filter(|&expected| expected != size) {
+                failures.push(format!("Size: expected {expected}, calculated {size}"));
             }
             for ((algorithm, expected), (_, actual)) in
                 entry.digests.values().into_iter().zip(digests.values())

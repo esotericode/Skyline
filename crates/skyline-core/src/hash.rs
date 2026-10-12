@@ -68,16 +68,11 @@ pub fn hash_stream(
     ))
 }
 
+/// Symlinks, and on Windows also junctions/mount points (name-surrogate reparse points).
+/// Other Windows reparse points, such as OneDrive placeholders and deduplicated files,
+/// hold their own data and are hashed like regular files.
 pub fn is_link(metadata: &std::fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        metadata.file_type().is_symlink()
-    }
+    metadata.file_type().is_symlink()
 }
 
 pub fn hash_file(

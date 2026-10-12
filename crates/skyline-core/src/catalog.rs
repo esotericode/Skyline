@@ -15,6 +15,22 @@ use std::{
 pub const MAX_DAT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 1_000_000;
 const MAX_TEXT: usize = 8192;
+/// Known Logiqx/No-Intro/MAME ROM attributes that describe an entry without changing
+/// which bytes the digests cover. Real DATs carry these on ordinary single-file entries.
+/// Anything else (including `header`, which implies a byte transformation) stays
+/// fail-closed as Unsupported.
+const DESCRIPTIVE_ATTRIBUTES: &[&str] = &[
+    "serial",
+    "date",
+    "merge",
+    "mia",
+    "bios",
+    "region",
+    "offset",
+    "optional",
+    "dispose",
+    "soundonly",
+];
 
 pub struct ImportedCatalog {
     pub catalog: Catalog,
@@ -111,7 +127,7 @@ fn entry(attributes: &BTreeMap<String, String>, game: &str) -> Result<CatalogEnt
                 !matches!(
                     key.as_str(),
                     "name" | "size" | "crc" | "md5" | "sha1" | "sha256" | "status"
-                )
+                ) && !DESCRIPTIVE_ATTRIBUTES.contains(&key.as_str())
             })
             .cloned()
             .collect(),

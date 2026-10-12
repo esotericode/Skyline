@@ -1,10 +1,32 @@
 use crate::model::{FileRecord, Verification};
+use std::{borrow::Cow, cmp::Ordering, path::Path};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Sort {
     Name,
     Status,
     Size,
+}
+
+/// Strongest evidence first, so sorting by verification groups results meaningfully.
+fn status_rank(status: &Verification) -> u8 {
+    match status {
+        Verification::Exact => 0,
+        Verification::CrcOnly => 1,
+        Verification::Ambiguous => 2,
+        Verification::Unknown => 3,
+        Verification::ReadError => 4,
+        Verification::Unsupported => 5,
+    }
+}
+
+/// Case-insensitive without allocating per comparison.
+fn compare_names(a: &Path, b: &Path) -> Ordering {
+    let a = a.file_name().unwrap_or_default().to_string_lossy();
+    let b = b.file_name().unwrap_or_default().to_string_lossy();
+    a.chars()
+        .flat_map(char::to_lowercase)
+        .cmp(b.chars().flat_map(char::to_lowercase))
 }
 
 /// Shared with the measurement harness so query timings measure actual UI logic.
@@ -37,12 +59,61 @@ pub fn query_rows(
         let a = &records[a];
         let b = &records[b];
         let order = match sort {
-            Sort::Name => a.path.file_name().cmp(&b.path.file_name()),
-            Sort::Status => a.result.status.label().cmp(b.result.status.label()),
+            Sort::Name => compare_names(&a.path, &b.path),
+            Sort::Status => status_rank(&a.result.status).cmp(&status_rank(&b.result.status)),
             Sort::Size => a.size.cmp(&b.size),
         }
         .then_with(|| a.path.cmp(&b.path));
         if descending { order.reverse() } else { order }
     });
     visible
+}
+
+/// Paths for people to read. Windows canonical paths carry a `\\?\` verbatim prefix that
+/// is noise in the interface; the stored path keeps it.
+pub fn display_path(path: &Path) -> Cow<'_, str> {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        Cow::Owned(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        Cow::Owned(rest.to_owned())
+    } else {
+        text
+    }
+}
+
+/// Binary units with one decimal place, e.g. "64.0 KiB".
+pub fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
+
+/// "YYYY-MM-DD HH:MM UTC" from Unix seconds (proleptic Gregorian, no time zone data).
+pub fn format_utc(unix_seconds: u64) -> String {
+    let days = (unix_seconds / 86_400) as i64;
+    let seconds = unix_seconds % 86_400;
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+        seconds / 3600,
+        seconds % 3600 / 60
+    )
 }
