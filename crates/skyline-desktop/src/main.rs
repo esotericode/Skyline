@@ -10,7 +10,7 @@ use skyline_core::{
     model::{Catalog, FileRecord, Verification},
     scan::{ScanOptions, ScanProgress, scan_folder},
     store::Store,
-    view::{Sort, query_rows},
+    view::{Sort, display_path, format_size, format_utc, query_rows},
 };
 use std::{
     collections::HashMap,
@@ -134,6 +134,9 @@ struct Skyline {
     receiver: Option<Receiver<Event>>,
     cancel: Cancellation,
     show_about: bool,
+    scroll_offset: f32,
+    viewport_height: f32,
+    scroll_request: Option<f32>,
 }
 
 impl Skyline {
@@ -165,6 +168,9 @@ impl Skyline {
             receiver: None,
             cancel: Cancellation::default(),
             show_about: false,
+            scroll_offset: 0.0,
+            viewport_height: 0.0,
+            scroll_request: None,
         };
         app.start(Job::Load, &cc.egui_ctx);
         app
@@ -253,6 +259,7 @@ impl Skyline {
     }
 
     fn filter_rows(&mut self) {
+        self.scroll_request = Some(0.0);
         self.visible = query_rows(
             &self.records,
             &self.search,
@@ -279,6 +286,9 @@ impl Skyline {
         });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
+                if self.receiver.is_some() {
+                    ui.spinner();
+                }
                 if self.receiver.is_some() && ui.button("Cancel job").clicked() {
                     self.cancel.cancel();
                     self.status = "Cancelling at the next safe boundary…".into();
@@ -295,7 +305,7 @@ impl Skyline {
                     "{} complete · {:.1} MiB · {}",
                     progress.completed_files,
                     progress.hashed_bytes as f64 / 1_048_576.0,
-                    progress.path.display()
+                    display_path(&progress.path)
                 ));
             }
             if let Some(error) = &self.error {
@@ -344,7 +354,7 @@ impl Skyline {
 
     fn details(&self, ctx: &egui::Context) {
         egui::SidePanel::right("details")
-            .default_width(330.0)
+            .default_width(300.0)
             .width_range(240.0..=650.0)
             .resizable(true)
             .show(ctx, |ui| {
@@ -356,11 +366,16 @@ impl Skyline {
                         return;
                     };
                     ui.label(RichText::new(record.display_name()).strong());
-                    ui.label(record.path.to_string_lossy());
-                    ui.label(record.result.status.label());
+                    ui.label(RichText::new(display_path(&record.path)).weak());
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(record.result.status.label())
+                            .color(status_color(&record.result.status))
+                            .strong(),
+                    );
                     ui.label(&record.result.explanation);
                     if let Some(size) = record.size {
-                        ui.label(format!("{size} bytes"));
+                        ui.label(format!("{} ({size} bytes)", format_size(size)));
                     }
                     if let Some(digests) = &record.digests {
                         ui.separator();
@@ -406,8 +421,12 @@ impl Skyline {
                                 }
                             ));
                             ui.label(format!(
-                                "Expected size: {:?}; set members: {}",
-                                candidate.entry.size, candidate.entry.group_members
+                                "Expected size: {}; set members: {}",
+                                candidate
+                                    .entry
+                                    .size
+                                    .map_or("not supplied".into(), |size| format!("{size} bytes")),
+                                candidate.entry.group_members
                             ));
                             ui.label(format!(
                                 "Checked: {}",
@@ -437,11 +456,11 @@ impl Skyline {
                                 ui.label(&catalog.provenance.provider);
                                 ui.label(format!(
                                     "Origin: {}",
-                                    catalog.provenance.origin.display()
+                                    display_path(&catalog.provenance.origin)
                                 ));
                                 ui.label(format!(
-                                    "Import time: {} (Unix UTC seconds)",
-                                    catalog.provenance.imported_unix_seconds
+                                    "Imported: {}",
+                                    format_utc(catalog.provenance.imported_unix_seconds)
                                 ));
                                 ui.label(format!(
                                     "License: {}",
@@ -459,116 +478,366 @@ impl Skyline {
             });
     }
 
+    /// Arrow/Page/Home/End move the row selection when no text field or popup has the keys.
+    fn keyboard_navigation(&mut self, ctx: &egui::Context) {
+        if self.visible.is_empty() || ctx.wants_keyboard_input() || ctx.is_popup_open() {
+            return;
+        }
+        let page = ((self.viewport_height / ROW_HEIGHT) as isize - 1).max(1);
+        let step = ctx.input(|input| {
+            use egui::Key;
+            let last = self.visible.len() as isize;
+            [
+                (Key::ArrowDown, 1),
+                (Key::ArrowUp, -1),
+                (Key::PageDown, page),
+                (Key::PageUp, -page),
+                (Key::End, last),
+                (Key::Home, -last),
+            ]
+            .into_iter()
+            .filter(|(key, _)| input.key_pressed(*key))
+            .map(|(_, step)| step)
+            .sum::<isize>()
+        });
+        if step == 0 {
+            return;
+        }
+        let current = self
+            .selected_row
+            .and_then(|id| self.visible.iter().position(|&row| row == id));
+        let position = match current {
+            Some(position) => (position as isize + step).clamp(0, self.visible.len() as isize - 1),
+            None if step > 0 => 0,
+            None => self.visible.len() as isize - 1,
+        } as usize;
+        self.selected_row = Some(self.visible[position]);
+        let top = position as f32 * ROW_HEIGHT;
+        if top < self.scroll_offset {
+            self.scroll_request = Some(top);
+        } else if top + ROW_HEIGHT > self.scroll_offset + self.viewport_height {
+            self.scroll_request = Some(top + ROW_HEIGHT - self.viewport_height);
+        }
+    }
+
     fn collection(&mut self, ctx: &egui::Context) {
+        self.keyboard_navigation(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 ui.heading("Collection");
-                let mut changed = ui
-                    .add(
-                        egui::TextEdit::singleline(&mut self.search)
-                            .hint_text("Search files or catalog titles")
-                            .desired_width(250.0),
-                    )
-                    .changed();
-                egui::ComboBox::from_id_salt("verification")
-                    .selected_text(
-                        self.status_filter
-                            .as_ref()
-                            .map_or("All results", Verification::label),
-                    )
-                    .show_ui(ui, |ui| {
-                        changed |= ui
-                            .selectable_value(&mut self.status_filter, None, "All results")
-                            .changed();
-                        for status in [
-                            Verification::Exact,
-                            Verification::CrcOnly,
-                            Verification::Ambiguous,
-                            Verification::Unknown,
-                            Verification::ReadError,
-                            Verification::Unsupported,
-                        ] {
-                            let label = status.label();
+                ui.add_space(8.0);
+                let mut changed = false;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    egui::ComboBox::from_id_salt("verification")
+                        .selected_text(
+                            self.status_filter
+                                .as_ref()
+                                .map_or("All results", Verification::label),
+                        )
+                        .show_ui(ui, |ui| {
                             changed |= ui
-                                .selectable_value(&mut self.status_filter, Some(status), label)
+                                .selectable_value(&mut self.status_filter, None, "All results")
                                 .changed();
-                        }
-                    });
+                            for status in STATUSES {
+                                let label = status.label();
+                                changed |= ui
+                                    .selectable_value(&mut self.status_filter, Some(status), label)
+                                    .changed();
+                            }
+                        });
+                    changed |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.search)
+                                .hint_text("Search files or catalog titles")
+                                .desired_width(ui.available_width()),
+                        )
+                        .changed();
+                });
                 if changed {
                     self.filter_rows();
                 }
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Sort:");
-                for (sort, label) in [
-                    (Sort::Name, "Filename"),
-                    (Sort::Status, "Verification"),
-                    (Sort::Size, "Size"),
-                ] {
-                    if ui.selectable_label(self.sort == sort, label).clicked() {
-                        self.sort = sort;
-                        self.filter_rows();
-                    }
-                }
-                if ui.checkbox(&mut self.descending, "Descending").changed() {
-                    self.filter_rows();
-                }
-            });
-            ui.separator();
+            ui.add_space(6.0);
             if self.records.is_empty() {
                 ui.add_space(60.0);
-                ui.heading("Your collection, understood.");
-                ui.label("Import a local DAT, enter a ROM folder, then scan and verify.");
-                ui.label(
-                    "Skyline compares file bytes with your selected references, entirely offline.",
-                );
+                ui.vertical_centered(|ui| {
+                    ui.heading("Your collection, understood.");
+                    ui.add_space(4.0);
+                    ui.label("Import a local DAT, enter a ROM folder, then scan and verify.");
+                    ui.label(
+                        RichText::new(
+                            "Skyline compares file bytes with your selected references, entirely offline.",
+                        )
+                        .weak(),
+                    );
+                });
                 return;
             }
+            let columns = Columns::new(ui.available_width());
+            self.table_header(ui, &columns);
             if self.visible.is_empty() {
-                ui.label("No rows match this search and filter.");
+                ui.add_space(24.0);
+                ui.vertical_centered(|ui| ui.label(RichText::new("No rows match this search and filter.").weak()));
+                return;
             }
-            egui::ScrollArea::both()
-                .auto_shrink([false, false])
-                .show_rows(ui, 46.0, self.visible.len(), |ui, range| {
-                    for position in range {
-                        let id = self.visible[position];
-                        let record = &self.records[id];
-                        let title = record
-                            .result
-                            .candidates
-                            .first()
-                            .map(|candidate| candidate.entry.filename.as_str())
-                            .unwrap_or("No unique catalog filename");
-                        let size = record.size.map_or("—".into(), |size| format!("{size} B"));
-                        let ambiguous = record.result.status == Verification::Ambiguous;
-                        let label = format!(
-                            "{}    ·    {}    ·    {}\n{}",
-                            record.display_name(),
-                            record.result.status.label(),
-                            size,
-                            if ambiguous {
-                                "Multiple identities — inspect candidates"
-                            } else {
-                                title
-                            }
-                        );
-                        let response = ui.add_sized(
-                            [ui.available_width().max(360.0), 44.0],
-                            egui::Button::selectable(self.selected_row == Some(id), label),
-                        );
-                        if response.clicked() {
-                            self.selected_row = Some(id);
-                        }
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+            if let Some(offset) = self.scroll_request.take() {
+                area = area.vertical_scroll_offset(offset);
+            }
+            let output = area.show_rows(ui, ROW_HEIGHT, self.visible.len(), |ui, range| {
+                for position in range {
+                    let id = self.visible[position];
+                    if self.table_row(ui, &columns, id, position % 2 == 1) {
+                        self.selected_row = Some(id);
                     }
-                });
+                }
+            });
+            self.scroll_offset = output.state.offset.y;
+            self.viewport_height = output.inner_rect.height();
         });
     }
+
+    fn table_header(&mut self, ui: &mut egui::Ui, columns: &Columns) {
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(columns.width, HEADER_HEIGHT),
+            egui::Sense::hover(),
+        );
+        let visuals = ui.visuals().clone();
+        ui.painter().line_segment(
+            [rect.left_bottom(), rect.right_bottom()],
+            visuals.widgets.noninteractive.bg_stroke,
+        );
+        for (index, (title, sort)) in [
+            ("Status", Some(Sort::Status)),
+            ("File", Some(Sort::Name)),
+            ("Catalog match", None),
+            ("Size", Some(Sort::Size)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let cell = columns.cell(rect, index);
+            let active = sort.is_some_and(|sort| sort == self.sort);
+            let mut color = visuals.weak_text_color();
+            if let Some(sort) = sort {
+                let response = ui
+                    .interact(cell, ui.id().with(("sort", index)), egui::Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.hovered() || active {
+                    color = visuals.strong_text_color();
+                }
+                if response.clicked() {
+                    if self.sort == sort {
+                        self.descending = !self.descending;
+                    } else {
+                        self.sort = sort;
+                        self.descending = false;
+                    }
+                    self.filter_rows();
+                }
+            }
+            let text = paint_cell(
+                ui,
+                cell,
+                RichText::new(title).strong().color(color),
+                index == 3,
+            );
+            if active && let Some(text) = text {
+                // Default fonts lack arrow glyphs, so the sort direction is painted.
+                let x = if index == 3 {
+                    text.left() - 12.0
+                } else {
+                    text.right() + 6.0
+                };
+                let (tip, base) = if self.descending {
+                    (4.0, -3.0)
+                } else {
+                    (-4.0, 3.0)
+                };
+                let y = text.center().y;
+                ui.painter().add(egui::Shape::convex_polygon(
+                    vec![
+                        egui::pos2(x, y + base),
+                        egui::pos2(x + 8.0, y + base),
+                        egui::pos2(x + 4.0, y + tip),
+                    ],
+                    color,
+                    egui::Stroke::NONE,
+                ));
+            }
+        }
+    }
+
+    /// Returns true when the row was clicked.
+    fn table_row(&self, ui: &mut egui::Ui, columns: &Columns, id: usize, stripe: bool) -> bool {
+        let record = &self.records[id];
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(columns.width, ROW_HEIGHT), egui::Sense::CLICK);
+        let selected = self.selected_row == Some(id);
+        let visuals = ui.visuals();
+        let fill = if selected {
+            visuals.selection.bg_fill
+        } else if response.hovered() {
+            visuals.widgets.hovered.weak_bg_fill
+        } else if stripe {
+            visuals.faint_bg_color
+        } else {
+            Color32::TRANSPARENT
+        };
+        ui.painter().rect_filled(rect, 3.0, fill);
+        let status = &record.result.status;
+        let status_cell = columns.cell(rect, 0);
+        ui.painter().circle_filled(
+            egui::pos2(status_cell.left() + 4.0, status_cell.center().y),
+            4.0,
+            status_color(status),
+        );
+        // Tinted text loses contrast on the selection fill; the dot keeps the color cue.
+        let strong = if selected {
+            visuals.selection.stroke.color
+        } else {
+            visuals.strong_text_color()
+        };
+        paint_cell(
+            ui,
+            status_cell.with_min_x(status_cell.left() + 14.0),
+            RichText::new(status.label()).color(if selected {
+                strong
+            } else {
+                status_color(status)
+            }),
+            false,
+        );
+        paint_cell(
+            ui,
+            columns.cell(rect, 1),
+            RichText::new(record.display_name()).color(strong),
+            false,
+        );
+        let matched = match record.result.candidates.as_slice() {
+            [] => RichText::new("—").weak(),
+            _ if *status == Verification::Ambiguous => RichText::new(format!(
+                "{} candidates · inspect details",
+                record.result.candidates.len()
+            ))
+            .color(status_color(status)),
+            [first, ..] => RichText::new(&first.entry.game),
+        };
+        paint_cell(ui, columns.cell(rect, 2), matched, false);
+        let size = record.size.map_or("—".into(), format_size);
+        paint_cell(ui, columns.cell(rect, 3), RichText::new(size).weak(), true);
+        let label = format!("{} · {}", record.display_name(), status.label());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &label)
+        });
+        response
+            .on_hover_text_at_pointer(display_path(&record.path))
+            .clicked()
+    }
+}
+
+const ROW_HEIGHT: f32 = 30.0;
+const HEADER_HEIGHT: f32 = 28.0;
+const CELL_PADDING: f32 = 8.0;
+const STATUSES: [Verification; 6] = [
+    Verification::Exact,
+    Verification::CrcOnly,
+    Verification::Ambiguous,
+    Verification::Unknown,
+    Verification::ReadError,
+    Verification::Unsupported,
+];
+
+/// Status text always accompanies the color; the color only speeds up scanning.
+fn status_color(status: &Verification) -> Color32 {
+    match status {
+        Verification::Exact => Color32::from_rgb(110, 205, 150),
+        Verification::CrcOnly => Color32::from_rgb(226, 190, 104),
+        Verification::Ambiguous => Color32::from_rgb(196, 160, 236),
+        Verification::Unknown => Color32::from_rgb(160, 170, 184),
+        Verification::ReadError => Color32::from_rgb(244, 136, 120),
+        Verification::Unsupported => Color32::from_rgb(132, 142, 156),
+    }
+}
+
+/// Fixed status/size columns; file and catalog match share the remaining width. Narrow
+/// panels (small windows, 125–150% display scaling) drop the catalog column, which the
+/// details panel repeats.
+struct Columns {
+    width: f32,
+    edges: [f32; 5],
+}
+
+impl Columns {
+    fn new(width: f32) -> Self {
+        let status = 164.0;
+        let size = 84.0;
+        let flexible = (width - status - size).max(120.0);
+        let file = if width >= 560.0 {
+            flexible * 0.55
+        } else {
+            flexible
+        };
+        let edges = [
+            0.0,
+            status,
+            status + file,
+            status + flexible,
+            status + flexible + size,
+        ];
+        Self {
+            width: edges[4].max(width),
+            edges,
+        }
+    }
+
+    fn cell(&self, row: egui::Rect, index: usize) -> egui::Rect {
+        egui::Rect::from_x_y_ranges(
+            row.left() + self.edges[index] + CELL_PADDING
+                ..=row.left() + self.edges[index + 1] - CELL_PADDING,
+            row.y_range(),
+        )
+    }
+}
+
+/// Single-line text, truncated with an ellipsis to fit the cell. Returns the text bounds.
+fn paint_cell(
+    ui: &egui::Ui,
+    cell: egui::Rect,
+    text: RichText,
+    right_align: bool,
+) -> Option<egui::Rect> {
+    if cell.width() < 1.0 {
+        return None;
+    }
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        cell.width().max(0.0),
+        egui::TextStyle::Body,
+    );
+    let x = if right_align {
+        cell.right() - galley.size().x
+    } else {
+        cell.left()
+    };
+    let pos = egui::pos2(x, cell.center().y - galley.size().y / 2.0);
+    let bounds = egui::Rect::from_min_size(pos, galley.size());
+    ui.painter()
+        .with_clip_rect(cell.intersect(ui.clip_rect()))
+        .galley(pos, galley, ui.visuals().text_color());
+    Some(bounds)
 }
 
 impl eframe::App for Skyline {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll();
-        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) && self.receiver.is_some() {
+        if self.receiver.is_some()
+            && !ctx.wants_keyboard_input()
+            && !ctx.is_popup_open()
+            && ctx.input(|input| input.key_pressed(egui::Key::Escape))
+        {
             self.cancel.cancel();
         }
         if ctx.input(|input| input.viewport().close_requested()) {
@@ -612,11 +881,40 @@ fn database_path() -> Result<PathBuf> {
     Ok(base.join("Skyline").join("skyline.sqlite3"))
 }
 
-fn main() -> Result<()> {
+fn main() {
     if std::env::args().any(|arg| arg == "--version") {
         println!("Skyline {VERSION}");
-        return Ok(());
+        return;
     }
+    if let Err(error) = run() {
+        report_startup_error(&format!("{error:#}"));
+        std::process::exit(1);
+    }
+}
+
+/// Release builds on Windows have no console, so stderr alone would make a failed start
+/// (for example, no usable OpenGL driver) look like the app never launched.
+fn report_startup_error(message: &str) {
+    eprintln!("Skyline could not start: {message}");
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+        let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+        let text = wide(&format!("Skyline could not start.\n\n{message}"));
+        let title = wide("Skyline");
+        // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call.
+        unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                text.as_ptr(),
+                title.as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+}
+
+fn run() -> Result<()> {
     let database = database_path()?;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

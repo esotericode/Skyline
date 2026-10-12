@@ -17,6 +17,7 @@ inventory, not a completed legal review or a binary-specific notices bundle.
 | serde 1.0.228 / serde_json 1.0.145 | Local record serialization | MIT OR Apache-2.0 |
 | anyhow 1.0.100 | Contextual local errors | MIT OR Apache-2.0 |
 | libc 0.2.190 (Unix) | O_NOFOLLOW file-open constant | MIT OR Apache-2.0 |
+| windows-sys 0.61.2 (Windows) | Startup-failure message box (already in the graph via winit) | MIT OR Apache-2.0 |
 | tempfile 3.23.0 (development only) | Disposable test/measurement directories | MIT OR Apache-2.0 |
 
 Source references: the versioned crates.io/Cargo metadata and upstream repository
@@ -26,7 +27,7 @@ URLs in the inventory; [egui](https://github.com/emilk/egui),
 [SQLite licensing](https://www.sqlite.org/copyright.html).
 
 Native boundaries: bundled SQLite is C; MSVC/Windows SDK and system graphics/
-windowing libraries support Windows; Linux uses X11/XKB/OpenGL and platform
+windowing libraries support Windows; Linux uses X11 or Wayland (loaded at runtime)/XKB/OpenGL and platform
 accessibility libraries. Rust UI logic does not require a browser or scripting
 runtime. Rust/compiler tooling and OS libraries are build/runtime dependencies
 distinct from application logic. AccessKit and default fonts require their own
