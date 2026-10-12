@@ -114,5 +114,5 @@ Interactive Windows/Linux dialog checks still need platform validation.
 
 Structured metadata, expected-entry selection, per-system preference profiles,
 Windows GUI/accessibility/scaling, interactive dialog validation and resource/latency
-baselines. ZIP, planning, copy/move, journals/history,
+baselines. 7z/RAR and disc adapters, planning, copy/move, journals/history,
 recovery and undo are not implemented. Provider download adapters remain disabled.

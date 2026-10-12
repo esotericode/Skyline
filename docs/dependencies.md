@@ -1,7 +1,7 @@
 # Dependency record
 
 Direct versions are exact pins in Cargo.toml; Cargo.lock pins all transitive
-versions. The [inventory](dependency-inventory.tsv) records 402 registry package
+versions. The [inventory](dependency-inventory.tsv) records 405 registry package
 versions and their declared SPDX license expressions/repositories from Cargo
 metadata on 2026-10-12, including optional/other-platform dependencies. This is an
 inventory, not a completed legal review or a binary-specific notices bundle.
@@ -11,6 +11,7 @@ inventory, not a completed legal review or a binary-specific notices bundle.
 | eframe / egui 0.33.3 | Native Rust UI, virtualized list, accessibility integration | MIT OR Apache-2.0 |
 | quick-xml 0.38.3 | Local XML event parsing, no resolver | MIT |
 | rusqlite 0.37.0 | Small Rust storage boundary | MIT |
+| zip 8.6.0 | Read-only ZIP member inspection (Deflate via pure-Rust zlib-rs, Deflate64); pinned below the days-old 9.0 line | MIT |
 | libsqlite3-sys 0.35.0 | Bundled SQLite C integration | MIT (wrapper); SQLite public domain |
 | sha2 0.10.9 / sha1 0.10.6 / md-5 0.10.6 | Streaming digest compatibility and fingerprints | MIT OR Apache-2.0 |
 | crc32fast 1.5.0 | CRC32 catalog compatibility | MIT OR Apache-2.0 |

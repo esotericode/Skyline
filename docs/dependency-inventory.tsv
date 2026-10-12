@@ -70,6 +70,7 @@ crossbeam-utils	0.8.23	MIT OR Apache-2.0	https://github.com/crossbeam-rs/crossbe
 crunchy	0.2.4	MIT	https://github.com/eira-fransham/crunchy
 crypto-common	0.1.7	MIT OR Apache-2.0	https://github.com/RustCrypto/traits
 cursor-icon	1.2.0	MIT OR Apache-2.0 OR Zlib	https://github.com/rust-windowing/cursor-icon
+deflate64	0.1.12	MIT	https://github.com/anatawa12/deflate64-rs
 digest	0.10.7	MIT OR Apache-2.0	https://github.com/RustCrypto/traits
 dispatch	0.2.0	MIT	http://github.com/SSheldon/rust-dispatch
 dispatch2	0.3.1	Zlib OR Apache-2.0 OR MIT	https://github.com/madsmtm/objc2
@@ -295,6 +296,7 @@ tracing-attributes	0.1.31	MIT	https://github.com/tokio-rs/tracing
 tracing-core	0.1.36	MIT	https://github.com/tokio-rs/tracing
 ttf-parser	0.25.1	MIT OR Apache-2.0	https://github.com/harfbuzz/ttf-parser
 type-map	0.5.1	MIT/Apache-2.0	https://github.com/kardeiz/type-map
+typed-path	0.12.3	MIT OR Apache-2.0	https://github.com/chipsenkbeil/typed-path
 typenum	1.20.1	MIT OR Apache-2.0	https://github.com/paholg/typenum
 uds_windows	1.2.1	MIT	https://github.com/haraldh/rust_uds_windows
 unicode-ident	1.0.27	(MIT OR Apache-2.0) AND Unicode-3.0	https://github.com/dtolnay/unicode-ident
@@ -395,6 +397,7 @@ zerofrom-derive	0.1.8	Unicode-3.0	https://github.com/unicode-org/icu4x
 zerotrie	0.2.5	Unicode-3.0	https://github.com/unicode-org/icu4x
 zerovec	0.11.8	Unicode-3.0	https://github.com/unicode-org/icu4x
 zerovec-derive	0.11.6	Unicode-3.0	https://github.com/unicode-org/icu4x
+zip	8.6.0	MIT	https://github.com/zip-rs/zip2
 zlib-rs	0.6.8	Zlib	https://github.com/trifectatechfoundation/zlib-rs
 zune-core	0.5.3	MIT OR Apache-2.0 OR Zlib	https://github.com/etemesi254/zune-image
 zune-jpeg	0.5.15	MIT OR Apache-2.0 OR Zlib	https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg

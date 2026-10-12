@@ -29,6 +29,10 @@
   pruned; the database is compacted. Folder limits raised to 2 GiB / 10M entries.
 - A catalog that cannot be re-derived keeps its entries and warns instead of blocking
   the database from opening. CLI `scan --dats <folder>` scans one DAT folder only.
+- ROMs inside ZIP files are verified read-only, one row per member, with the same
+  header handling; damaged, encrypted and unusual members are reported per member and
+  decompression bombs are refused. Adds `zip` 8.6.0 (MIT; Deflate via pure-Rust
+  zlib-rs, Deflate64).
 - CLI `import-folder`, targeted synthetic regressions and local benchmarks.
 - Shared UI/CLI version advances to 0.0.2 for the next different testing distribution.
 

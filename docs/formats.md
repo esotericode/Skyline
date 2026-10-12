@@ -78,11 +78,26 @@ Each file is verified on its own; when its game lists several files (alternative
 set parts) the explanation says set completeness is not checked. Unsupported
 comparison requirements stay inspection-only.
 
+## ZIP archives
+
+Each `.zip` is opened read-only and every member is treated like a loose file: the same
+ROM-like/size read rule, header handling, header checks and Other classification. A
+member gets its own row; a one-ROM ZIP named after its ROM shows the archive's name,
+otherwise `Archive.zip › member`. Nothing is extracted to disk. Stored, Deflate and
+Deflate64 members are read; encrypted members, other compression methods and nested
+archives are Unsupported, and damaged members (failed CRC, size mismatch) are read
+errors without stopping the scan. A member is never decompressed past its declared
+size; members over 16 GiB, or over 1 GiB claiming more than 1000× their stored size,
+are refused as possible decompression bombs. Archives listing more than 65,536 members
+are not inspected. A file named `.zip` that is not a ZIP is a read error, never hashed
+as a loose ROM. Matching a ZIP file *as a whole* against DAT entries that list `.zip`
+files stays inspection-only.
+
 ## Remaining adapters
 
 | Capability | State |
 | --- | --- |
-| Streaming ZIP member verification | Planned next archive milestone; ZIP containers are not hashed as ROM members |
+| Streaming ZIP member verification | Implemented: members are hashed and matched like loose files, read-only and never extracted; stored, Deflate and Deflate64 methods; encrypted, other methods, nested archives and damaged members are reported per member |
 | 7z/RAR and other archives | Adapter required |
 | Disc sets, CUE/BIN relationships and multi-disc grouping | Adapter required; a loose `.bin` fingerprint does not establish disc-set completeness |
 | CHD/RVZ and compressed disc containers | Adapter required |

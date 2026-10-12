@@ -62,8 +62,9 @@ Unrelated catalog variants or broken reference files do not generate popups.
 
 All scans reread bytes and preserve originals. Unknown does not mean corrupt;
 CRC-only has reduced confidence; matching a bad dump preserves its flag. Shared bytes
-across system identities remain Ambiguous. ZIP, dedicated containers and unsupported
-sets are visibly Unsupported. Recognized NES/Atari 7800/Lynx/SNES copier headers are
+across system identities remain Ambiguous. ROMs inside ZIP files are checked like
+loose files, one row per member; 7z/RAR, disc images and other containers are visibly
+Unsupported. Recognized NES/Atari 7800/Lynx/SNES copier headers are
 excluded for a second comparison when the whole file has no match, and the details
 say so; the file is never changed. **Format & headers** shows detected headers, catalog expectations and loader notes.
 Byte order (N64 .v64/.n64) is identified by signature when available and is not converted. File
