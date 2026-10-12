@@ -119,5 +119,10 @@ Size gating cannot categorically prevent reading LICENSE/Makefile/.git files:
 matching sizes or a size-unspecified DAT entry still enable those reads. The coverage
 guide now states that limit accurately. Prior notes about catalog relabel/removal,
 the override controls and N64 byte order remain open; no identity policy was changed.
-Promotion to main is explicitly authorized by the owner; it will preserve history
-with a fast-forward. Final main ref and CI/artifact results are recorded in AGENTS.md.
+Promotion to main was explicitly authorized by the owner and completed with a
+leased, non-forced fast-forward to [5553c4b](https://github.com/esotericode/Skyline/commit/5553c4bc779dddfb965f7621dfb125b06a1c90ba).
+[Main CI 38312007058](https://github.com/esotericode/Skyline/actions/runs/38312007058)
+passes all 49 tests on Windows/Linux, formatting, lint, locked optimized builds,
+version consistency, packaging and upload of the initial 0.0.1 testing artifacts.
+Native Windows GUI/OneDrive validation remains open. Subsequent validation-record
+changes are documentation only; the tested source is unchanged.
