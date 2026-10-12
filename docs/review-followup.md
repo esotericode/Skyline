@@ -30,3 +30,8 @@ tests; passing compilation or a junction fixture does not establish those result
 The review's Linux GNOME screenshots/runtime observations were not repeated here.
 
 Source remains 0.0.1 unreleased. This work does not publish a testing binary or tag.
+
+Final follow-up [CI run 38301720896](https://github.com/esotericode/Skyline/actions/runs/38301720896)
+passes on Windows/Linux for source revision 13e19c2: 34 tests per platform, formatting,
+Clippy with warnings denied, optimized desktop/CLI builds and version consistency.
+Later commits update this validation record only.
