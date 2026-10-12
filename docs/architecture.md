@@ -44,8 +44,8 @@ raw region/revision/language text; structured metadata extraction is pending.
 
 Recursive scans stream .gb/.gbc/.rom/.bin through CRC32/MD5/SHA-1/SHA-256 in one pass.
 No header transformation or source writes occur. ZIP/other formats stay Unsupported.
-Relative-prefix exclusions and cancellation are supported. Links/reparse points
-are skipped; recursion is capped at 128, records at 100,000. Size/mtime changes and
+Relative-prefix exclusions and cancellation are supported. Symlinks and junctions
+are skipped (other Windows reparse points such as OneDrive placeholders are hashed); recursion is capped at 128, records at 100,000. Size/mtime changes and
 Unix file identity are checked. The prototype assumes a stable directory tree;
 hardened descriptor-relative traversal against concurrent parent swaps remains
 required before an executor. Every scan rehashes; no size/mtime hash cache exists.

@@ -10,5 +10,12 @@
 - SQLite catalogs/snapshots and last completed scan; native search/filter/sort,
   details, progress and About with a shared application version.
 
+- Review fixes: DAT descriptive attributes such as `serial` and `mia` no longer mark
+  entries Unsupported; Windows OneDrive/deduplicated files are no longer skipped as
+  links; the collection is a sortable, status-colored table with keyboard navigation
+  and responsive columns; readable sizes, dates and Windows paths in details.
+- Wayland sessions are supported natively; a failed start shows an error dialog on
+  Windows instead of exiting silently.
+
 Limits: Windows GUI and responsiveness baseline pending; no ZIP, organization,
 copy/move/recovery, native dialogs or persisted UI settings. Code license pending.
