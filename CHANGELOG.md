@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.0.2 — Unreleased
+## 0.0.3 — Development testing build
+
+- Right-click a collection row to show the file in the file manager (Explorer selects
+  it on Windows; the freedesktop FileManager1 interface on Linux, falling back to
+  opening the folder) or to copy its path; the details panel has the same button.
+
+## 0.0.2 — Development testing build (2026-10-12, commit 74f85a6)
 
 - One recursive DAT-folder source replaces the per-file/system picker. Choosing the
   folder indexes it; scans refresh it automatically and consider all active variants.
@@ -33,9 +39,6 @@
   header handling; damaged, encrypted and unusual members are reported per member and
   decompression bombs are refused. Adds `zip` 8.6.0 (MIT; Deflate via pure-Rust
   zlib-rs, Deflate64).
-- Right-click a collection row to show the file in the file manager (Explorer selects
-  it on Windows; the freedesktop FileManager1 interface on Linux, falling back to
-  opening the folder) or to copy its path; the details panel has the same button.
 - CLI `import-folder`, targeted synthetic regressions and local benchmarks.
 - Shared UI/CLI version advances to 0.0.2 for the next different testing distribution.
 
