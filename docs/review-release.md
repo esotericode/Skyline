@@ -38,3 +38,23 @@ structured metadata/preferences, native accessibility/scaling/resource measures 
 planner/copy/move/journal/recovery remain unfinished. Code-license selection and full
 notice review remain open for general release; the owner explicitly requested this
 limited testing prerelease.
+
+## Publication verified
+
+Main fast-forwarded ac1f264 → [5072abd](https://github.com/esotericode/Skyline/commit/5072abdafc31ccc4d0f79215eaf2d2dba3633439);
+PR #4 automatically marked merged. [CI 38345303158](https://github.com/esotericode/Skyline/actions/runs/38345303158)
+passes both full platform checks and the publication job. The publisher validates
+the downloaded artifact SHA-256 and every original package file, preserves EXE
+hashes, uploads to a draft, publishes a prerelease, and checks tag/asset digests.
+GitHub API confirms the public [v0.0.3 release](https://github.com/esotericode/Skyline/releases/tag/v0.0.3),
+its source tag at 097518d0 and the uploaded ZIP/checksum assets.
+
+ZIP: 5,436,857 bytes, SHA-256
+`44000d96b35ca437edd4802c0fae4042c2bd5d3dfb2b5ac286e2e9e182513e40`.
+The publication log records Skyline.exe
+`ec67320a6b50ec50f6e1703c2792b86ebfb838d6320f0f643f1c72f9b742ab36`
+and skyline-cli.exe
+`5b9c2a40b72943a8d64db309203a9ba969ff5374f95d92225abb1688360d0d7d`.
+No native Windows GUI smoke test is claimed. Future releases must update the source,
+version, release manifest and version-specific notes, and correct the development
+packager's old ZIP wording before distributing another development package.
