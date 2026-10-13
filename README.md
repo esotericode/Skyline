@@ -52,6 +52,8 @@ Windows SmartScreen may warn before the first launch. Windows: extract and run
    Variants group under one heading; file details retain their exact source identities.
 4. Browse/search/filter while the worker runs. **Cancel job** or Escape cancels.
    Select a row for calculated/expected hashes, reference flags and source evidence.
+   Right-click a row (or use the button in its details) to show the file in your file
+   manager, or to copy its path; for a ROM inside a ZIP, the ZIP is shown.
    **Reference details** holds optional catalog lists and per-file intake problems.
 5. Check the version in the header or **About** window.
 

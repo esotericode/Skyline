@@ -1,6 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod preferences;
+mod reveal;
 
 use anyhow::{Context, Result};
 use eframe::egui::{self, Color32, RichText};
@@ -752,7 +753,9 @@ impl Skyline {
         });
     }
 
-    fn details(&self, ctx: &egui::Context) {
+    /// Returns a file to show in the file manager when its button was pressed.
+    fn details(&self, ctx: &egui::Context) -> Option<PathBuf> {
+        let mut reveal = None;
         egui::SidePanel::right("details")
             .default_width(300.0)
             .width_range(240.0..=650.0)
@@ -769,6 +772,14 @@ impl Skyline {
                     ui.label(RichText::new(display_path(&record.path)).weak());
                     if let Some(member) = &record.member {
                         ui.label(format!("Inside this ZIP: {member}"));
+                    }
+                    let label = if record.member.is_some() {
+                        "Show ZIP in file manager"
+                    } else {
+                        "Show in file manager"
+                    };
+                    if ui.small_button(label).clicked() {
+                        reveal = Some(record.path.clone());
                     }
                     ui.add_space(4.0);
                     ui.label(
@@ -918,6 +929,7 @@ impl Skyline {
                     }
                 });
             });
+        reveal
     }
 
     /// Arrow/Page/Home/End move the row selection when no text field or popup has the keys.
@@ -1035,8 +1047,19 @@ impl Skyline {
             let output = area.show_rows(ui, ROW_HEIGHT, self.visible.len(), |ui, range| {
                 for position in range {
                     let id = self.visible[position];
-                    if self.table_row(ui, &columns, id, position % 2 == 1) {
-                        self.selected_row = Some(id);
+                    match self.table_row(ui, &columns, id, position % 2 == 1) {
+                        Some(RowAction::Select) => self.selected_row = Some(id),
+                        Some(RowAction::Reveal) => {
+                            self.selected_row = Some(id);
+                            self.reveal_file(self.records[id].path.clone());
+                        }
+                        Some(RowAction::CopyPath) => {
+                            self.selected_row = Some(id);
+                            ui.ctx()
+                                .copy_text(display_path(&self.records[id].path).into_owned());
+                            self.status = "File path copied".into();
+                        }
+                        None => {}
                     }
                 }
             });
@@ -1116,8 +1139,13 @@ impl Skyline {
         }
     }
 
-    /// Returns true when the row was clicked.
-    fn table_row(&self, ui: &mut egui::Ui, columns: &Columns, id: usize, stripe: bool) -> bool {
+    fn table_row(
+        &self,
+        ui: &mut egui::Ui,
+        columns: &Columns,
+        id: usize,
+        stripe: bool,
+    ) -> Option<RowAction> {
         let record = &self.records[id];
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(columns.width, ROW_HEIGHT), egui::Sense::CLICK);
@@ -1196,10 +1224,45 @@ impl Skyline {
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &label)
         });
-        response
-            .on_hover_text_at_pointer(display_path(&record.path))
-            .clicked()
+        let mut action = None;
+        // Right-click: the row is selected and its file can be shown or its path copied.
+        response.context_menu(|ui| {
+            action = Some(RowAction::Select);
+            let reveal = if record.member.is_some() {
+                "Show ZIP in file manager"
+            } else {
+                "Show in file manager"
+            };
+            if ui.button(reveal).clicked() {
+                action = Some(RowAction::Reveal);
+                ui.close();
+            }
+            if ui.button("Copy file path").clicked() {
+                action = Some(RowAction::CopyPath);
+                ui.close();
+            }
+        });
+        let response = response.on_hover_text_at_pointer(display_path(&record.path));
+        if response.clicked() {
+            action = Some(RowAction::Select);
+        }
+        action
     }
+
+    /// Opens the platform file manager at `path` (a file, or the ZIP holding a member).
+    fn reveal_file(&mut self, path: PathBuf) {
+        match reveal::reveal(path) {
+            Ok(()) => self.status = "Opening the file manager…".into(),
+            Err(error) => self.error = Some(format!("Could not show the file: {error}")),
+        }
+    }
+}
+
+/// What a click or the context menu asked of a table row.
+enum RowAction {
+    Select,
+    Reveal,
+    CopyPath,
 }
 
 const ROW_HEIGHT: f32 = 30.0;
@@ -1323,7 +1386,9 @@ impl eframe::App for Skyline {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         self.controls(ctx, frame);
-        self.details(ctx);
+        if let Some(path) = self.details(ctx) {
+            self.reveal_file(path);
+        }
         self.collection(ctx);
         egui::Window::new("About Skyline").open(&mut self.show_about).resizable(false).show(ctx, |ui| {
             ui.heading(format!("Skyline {VERSION}"));
