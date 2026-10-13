@@ -22,6 +22,8 @@ jobs:
       - name: Linux development libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libxi-dev libgl1-mesa-dev
+      - name: Check release helper syntax
+        run: python -m py_compile scripts/publish-windows-release.py
       - run: cargo fmt --all -- --check
       - run: cargo test --locked --workspace
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
@@ -31,10 +33,10 @@ jobs:
         run: |
           version=$(cargo metadata --locked --no-deps --format-version 1 | python -c 'import json,sys; p=json.load(sys.stdin)["packages"]; v={x["version"] for x in p}; assert len(v)==1; print(v.pop())')
           test "$(target/release/skyline-cli --version)" = "Skyline $version"
-      # Development testing artifacts use a fresh shared version for each new distribution.
+      # Main checks do not distribute rebuilt bytes under a previously used version.
       - name: Package development build
         id: package
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: scripts/package-dev-build.sh ${{ runner.os == 'Windows' && 'windows-x64' || 'linux-x64' }} dist
       - name: Upload development build
@@ -45,3 +47,18 @@ jobs:
           path: ${{ steps.package.outputs.path }}
           retention-days: 30
           if-no-files-found: error
+  publish-windows:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release windows]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish checked Windows binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/publish-windows-release.py

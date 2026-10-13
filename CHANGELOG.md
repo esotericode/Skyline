@@ -1,10 +1,14 @@
 # Changelog
 
-## 0.0.3 — Development testing build
+## 0.0.3 — Windows testing prerelease (2026-10-13)
 
 - Right-click a collection row to show the file in the file manager (Explorer selects
   it on Windows; the freedesktop FileManager1 interface on Linux, falling back to
   opening the folder) or to copy its path; the details panel has the same button.
+
+- Windows GitHub Release publishes the checked 097518d0 executable bytes without
+  recompilation, with corrected package documentation, source provenance and SHA-256
+  checksums. Native Windows GUI acceptance remains pending.
 
 ## 0.0.2 — Development testing build (2026-10-12, commit 74f85a6)
 

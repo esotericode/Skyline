@@ -1,8 +1,8 @@
 # Skyline
 
 A Rust desktop ROM manager for offline identification, explainable verification and
-file preservation across many systems. **0.0.2 is a read-only development prototype**
-for loose cartridge files and local Logiqx XML DATs. NES, SNES, Nintendo 64, GBA,
+file preservation across many systems. **0.0.3 is a read-only testing release**
+for loose and zipped cartridge files and local Logiqx XML DATs. NES, SNES, Nintendo 64, GBA,
 DS, Sega, Atari, PC Engine, Neo Geo Pocket, WonderSwan and other loose representations
 share the same byte-verification pipeline. See [format coverage](docs/formats.md)
 for the supported workflow and remaining adapters. All 250 DATs in the owner-selected
@@ -25,19 +25,31 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo run --locked -p skyline-desktop
 ```
 
+## Windows download
+
+Get [Skyline 0.0.3 for Windows x64](https://github.com/esotericode/Skyline/releases/tag/v0.0.3).
+Download `Skyline-v0.0.3-windows-x64.zip`, extract it and run `Skyline.exe`.
+No installer is needed; OpenGL 2 or newer is required. The release includes SHA-256
+checksums, source/build provenance and known limitations. It is an unsigned testing
+prerelease, with native Windows GUI acceptance still pending.
+
+The Windows executable bytes are the same checked development build from source
+097518d0; publication corrects package documentation without recompiling or changing
+binaries. Version 0.0.3 appears in the header, About window and window title.
+
 ## Development builds
 
-Every push to `main` that passes CI uploads Windows x64 and Linux x64 builds as
-artifacts on that [Actions run](https://github.com/esotericode/Skyline/actions/workflows/ci.yml)
-(signed-in GitHub users; kept 30 days). They are named
-`Skyline-v<version>-dev.<commit>-<platform>`, include `BUILD-INFO.txt` and
-`SHA256SUMS.txt`, and are development testing snapshots. Each different distributed
-testing build advances the shared version visible in the UI; commit labels identify
-the source, and no tagged GitHub Release is created. Builds are unsigned, so
-Windows SmartScreen may warn before the first launch. Windows: extract and run
-`Skyline.exe` (needs OpenGL 2 or newer). Linux: extract the `.tar.gz` and run `Skyline`
-(X11 or Wayland, OpenGL and libxkbcommon). Package locally after a release build with
-`scripts/package-dev-build.sh <windows-x64|linux-x64>`.
+Routine CI checks builds on Windows and Linux. Manual workflow runs can package
+Actions artifacts (signed-in GitHub users; 30-day retention), named
+`Skyline-v<version>-dev.<commit>-<platform>`. Every different distributed testing
+build needs a fresh shared version. Main pushes do not automatically upload a newly
+rebuilt package under a version that has already been distributed.
+
+A main commit explicitly marked `[release windows]` publishes the checked Windows
+artifact pinned in `.github/windows-release.json`, after both platform checks pass.
+The publisher verifies source/run/artifact provenance and every package checksum,
+preserves executable bytes, refuses conflicting published assets, and publishes a
+prerelease with checksums. See [versioning](docs/versioning.md).
 
 ## Try it
 
@@ -109,5 +121,5 @@ folder snapshots remain available as history, rather than entering future scans.
 
 See [architecture](docs/architecture.md), [versioning](docs/versioning.md),
 [dependency notices](docs/dependencies.md), [performance](docs/performance.md), and
-[changelog](CHANGELOG.md). Windows GUI validation and distribution remain pending;
+[changelog](CHANGELOG.md). Native Windows GUI acceptance remains pending;
 Linux core checks do not establish desktop support. Code license awaits owner choice.
